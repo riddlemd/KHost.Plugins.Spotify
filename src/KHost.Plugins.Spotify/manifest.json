@@ -1,0 +1,15 @@
+{
+  "$schema": "../../../KHost/src/KHost.Plugins.Sdk/manifest.schema.json",
+  "id": "6b1d3a58-4f27-4c0e-9a11-2e5c7d8b4f36",
+  "name": "Spotify Break Music",
+  "version": "1.0.0",
+  "author": "KHost",
+  "description": "Plays break music through the Spotify desktop app on this machine.",
+  "entryAssembly": "KHost.Plugins.Spotify.dll",
+  "apiVersion": 1,
+  "settings": [
+    { "key": "playlistUri", "type": "string", "label": "Playlist (Spotify link or URI — blank resumes whatever Spotify has loaded)" },
+    { "key": "shuffle", "type": "bool", "label": "Shuffle the playlist", "default": true },
+    { "key": "launchIfNotRunning", "type": "bool", "label": "Launch Spotify if it is not already running", "default": true }
+  ]
+}

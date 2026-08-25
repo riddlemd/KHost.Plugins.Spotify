@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Sibling checkout of the KHost repo; swap for the KHost.Plugins.Sdk NuGet package once published. -->
+    <ProjectReference Include="..\..\..\KHost\src\KHost.Plugins.Sdk\KHost.Plugins.Sdk.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The provider's controller seam is internal: ActivatorUtilities must not see a constructor
+         the host cannot supply, but the tests need one to inject a fake backend into. -->
+    <InternalsVisibleTo Include="KHost.Plugins.Spotify.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="manifest.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Dev convenience: drop the built plugin into a sibling KHost checkout's runtime plugins
+       folder when one exists. Harmless no-op anywhere else. -->
+  <Target Name="DeployToSiblingKHost" AfterTargets="Build"
+          Condition="Exists('$(MSBuildProjectDirectory)\..\..\..\KHost\src\KHost.UserInterface\bin\Debug\net10.0')">
+    <ItemGroup>
+      <_PluginFiles Include="$(TargetDir)**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_PluginFiles)"
+          DestinationFiles="@(_PluginFiles->'$(MSBuildProjectDirectory)\..\..\..\KHost\src\KHost.UserInterface\bin\Debug\net10.0\plugins\khost.spotify\%(RecursiveDir)%(Filename)%(Extension)')" />
+  </Target>
+
+</Project>

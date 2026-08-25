@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/KHost.Plugins.Spotify/KHost.Plugins.Spotify.csproj" />
+    <Project Path="../KHost/src/KHost.Plugins.Sdk/KHost.Plugins.Sdk.csproj" />
+  </Folder>
+
+  <Folder Name="/tests/">
+    <Project Path="tests/KHost.Plugins.Spotify.Tests/KHost.Plugins.Spotify.Tests.csproj" />
+  </Folder>
+</Solution>
