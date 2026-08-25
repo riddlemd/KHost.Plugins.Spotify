@@ -22,6 +22,8 @@
   <PropertyGroup>
     <_DeployTargetFramework Condition="$([MSBuild]::IsOSPlatform('Windows'))">net10.0-windows10.0.19041.0</_DeployTargetFramework>
     <_DeployTargetFramework Condition="!$([MSBuild]::IsOSPlatform('Windows'))">net10.0</_DeployTargetFramework>
+    <_KHostOutputDir>$(MSBuildProjectDirectory)\..\..\..\KHost\src\KHost.UserInterface\bin\Debug\net10.0</_KHostOutputDir>
+    <_PluginDeployDir>$(_KHostOutputDir)\plugins\khost.spotify</_PluginDeployDir>
   </PropertyGroup>
 
   <ItemGroup>
@@ -42,12 +44,23 @@
   <!-- Dev convenience: drop the built plugin into a sibling KHost checkout's runtime plugins
        folder when one exists. Harmless no-op anywhere else. -->
   <Target Name="DeployToSiblingKHost" AfterTargets="Build"
-          Condition="Exists('$(MSBuildProjectDirectory)\..\..\..\KHost\src\KHost.UserInterface\bin\Debug\net10.0') And '$(TargetFramework)' == '$(_DeployTargetFramework)'">
+          Condition="Exists('$(_KHostOutputDir)') And '$(TargetFramework)' == '$(_DeployTargetFramework)'">
     <ItemGroup>
+      <!-- Globbed inside the target so it sees what is on disk now, not at evaluation. -->
+      <_StalePluginFiles Include="$(_PluginDeployDir)\**\*" />
       <_PluginFiles Include="$(TargetDir)**\*" />
     </ItemGroup>
+
+    <!-- Emptied first, because a copy only overwrites what it brings: renaming the assembly or
+         dropping a reference otherwise leaves the old file beside the new one, and the folder
+         stops matching what the build produced. It also keeps the two target frameworks from
+         layering, since only one of them ships the WinRT projection. ContinueOnError so a running
+         KHost, which holds every loaded plugin assembly mapped on Windows, fails on the copy below
+         with a message that names the locking process instead of here with a bare delete error. -->
+    <Delete Files="@(_StalePluginFiles)" ContinueOnError="true" />
+
     <Copy SourceFiles="@(_PluginFiles)"
-          DestinationFiles="@(_PluginFiles->'$(MSBuildProjectDirectory)\..\..\..\KHost\src\KHost.UserInterface\bin\Debug\net10.0\plugins\khost.spotify\%(RecursiveDir)%(Filename)%(Extension)')" />
+          DestinationFiles="@(_PluginFiles->'$(_PluginDeployDir)\%(RecursiveDir)%(Filename)%(Extension)')" />
   </Target>
 
 </Project>
