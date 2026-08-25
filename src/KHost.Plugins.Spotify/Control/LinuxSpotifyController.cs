@@ -51,6 +51,49 @@ public sealed class LinuxSpotifyController : ISpotifyController
         return true;
     }
 
+    /// <summary>
+    /// MPRIS reports the transport as a property. Null when the bus call fails at all — Spotify
+    /// not being on the bus is itself the answer that it is not playing.
+    /// </summary>
+    public async Task<SpotifyState?> GetStateAsync(CancellationToken cancellationToken = default)
+    {
+        var status = await ReadPropertyAsync("PlaybackStatus", cancellationToken);
+        if (status is null)
+            return null;
+
+        var playback = status.Contains("Playing", StringComparison.Ordinal) ? SpotifyPlayback.Playing
+            : status.Contains("Paused", StringComparison.Ordinal) ? SpotifyPlayback.Paused
+            : SpotifyPlayback.Stopped;
+
+        var metadata = await ReadPropertyAsync("Metadata", cancellationToken);
+
+        return new SpotifyState(playback, MprisMetadata.Title(metadata), MprisMetadata.Artist(metadata));
+    }
+
+    private async Task<string?> ReadPropertyAsync(string property, CancellationToken cancellationToken)
+    {
+        List<string> arguments =
+        [
+            "call", "--session",
+            "--dest", Destination,
+            "--object-path", ObjectPath,
+            "--method", "org.freedesktop.DBus.Properties.Get",
+            PlayerInterface, property,
+        ];
+
+        try
+        {
+            var result = await ProcessRunner.RunAsync("gdbus", arguments, cancellationToken);
+
+            return result.Succeeded ? result.StandardOutput : null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not read Spotify's {Property} over MPRIS", property);
+            return null;
+        }
+    }
+
     public Task PauseAsync(CancellationToken cancellationToken = default)
         => CallAsync($"{PlayerInterface}.Pause", [], cancellationToken);
 

@@ -1,5 +1,6 @@
 using KHost.Plugins.Sdk.Services;
 using KHost.Plugins.Spotify;
+using KHost.Plugins.Spotify.Control;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Diagnostics;
 
@@ -21,9 +22,58 @@ public class SpotifyBreakMusicProviderTests
     public void RendersThroughHost_IsFalse_BecauseTheSoundLeavesSpotifysOwnOutput()
         => Assert.False(Build().RendersThroughHost);
 
+    // A property cannot go and ask, so it stays empty until a command has been through.
     [Fact]
-    public void CurrentTrack_IsNull_BecauseNothingIsReadBackOutOfSpotify()
+    public void CurrentTrack_BeforeAnyCommand_IsNull()
         => Assert.Null(Build().CurrentTrack);
+
+    [Fact]
+    public async Task CurrentTrack_AfterStarting_NamesWhatSpotifyReports()
+    {
+        _controller.State = new SpotifyState(SpotifyPlayback.Paused, "Blue Monday", "New Order");
+
+        var provider = Build();
+        await provider.StartAsync();
+
+        Assert.Equal("Blue Monday", provider.CurrentTrack!.Title);
+        Assert.Equal("New Order", provider.CurrentTrack.Artist);
+    }
+
+    // The host put break music on themselves while waiting for a first singer. Starting again
+    // must not send a command — on Windows that is one key, and it would stop the room's music.
+    [Fact]
+    public async Task StartAsync_SpotifyAlreadyPlaying_LeavesItAloneAndReportsSuccess()
+    {
+        _controller.State = new SpotifyState(SpotifyPlayback.Playing, "Blue Monday", "New Order");
+
+        var provider = Build();
+
+        Assert.True(await provider.StartAsync());
+        Assert.DoesNotContain("start", _controller.Calls);
+        Assert.Equal("Blue Monday", provider.CurrentTrack!.Title);
+    }
+
+    [Fact]
+    public async Task StartAsync_SpotifyPaused_StartsItAsBefore()
+    {
+        _controller.State = new SpotifyState(SpotifyPlayback.Paused);
+
+        await Build().StartAsync();
+
+        Assert.Contains("start", _controller.Calls);
+    }
+
+    // A backend that cannot see must not be treated as "already playing", or break music never
+    // starts at all on that platform.
+    [Fact]
+    public async Task StartAsync_StateUnreadable_StartsItAnyway()
+    {
+        _controller.State = null;
+
+        await Build().StartAsync();
+
+        Assert.Contains("start", _controller.Calls);
+    }
 
     [Fact]
     public async Task StartAsync_SpotifyCouldNotBeReached_IsFalse()

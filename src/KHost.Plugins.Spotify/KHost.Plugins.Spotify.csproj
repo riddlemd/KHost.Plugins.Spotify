@@ -1,9 +1,27 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <!-- The Windows target exists only for Windows.Media.Control, which is how this plugin reads
+         Spotify's transport back on Windows; macOS and Linux read theirs through AppleScript and
+         MPRIS and need nothing extra. Everything else builds the plain target. -->
+    <TargetFrameworks>net10.0;net10.0-windows10.0.19041.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0'">
+    <DefineConstants>$(DefineConstants);WINDOWS_MEDIA_SESSION</DefineConstants>
+    <!-- The host is a plain net10.0 process, so it carries no WinRT projection of its own. A
+         plugin folder that does not ship one loads fine and then throws FileNotFoundException the
+         first time the media session is read. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <!-- One build reaches the host's plugins folder, not both: the two targets write the same file
+       names, so deploying each in turn would leave whichever finished last. -->
+  <PropertyGroup>
+    <_DeployTargetFramework Condition="$([MSBuild]::IsOSPlatform('Windows'))">net10.0-windows10.0.19041.0</_DeployTargetFramework>
+    <_DeployTargetFramework Condition="!$([MSBuild]::IsOSPlatform('Windows'))">net10.0</_DeployTargetFramework>
   </PropertyGroup>
 
   <ItemGroup>
@@ -24,7 +42,7 @@
   <!-- Dev convenience: drop the built plugin into a sibling KHost checkout's runtime plugins
        folder when one exists. Harmless no-op anywhere else. -->
   <Target Name="DeployToSiblingKHost" AfterTargets="Build"
-          Condition="Exists('$(MSBuildProjectDirectory)\..\..\..\KHost\src\KHost.UserInterface\bin\Debug\net10.0')">
+          Condition="Exists('$(MSBuildProjectDirectory)\..\..\..\KHost\src\KHost.UserInterface\bin\Debug\net10.0') And '$(TargetFramework)' == '$(_DeployTargetFramework)'">
     <ItemGroup>
       <_PluginFiles Include="$(TargetDir)**\*" />
     </ItemGroup>

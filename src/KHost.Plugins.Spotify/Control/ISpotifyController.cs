@@ -1,13 +1,20 @@
 namespace KHost.Plugins.Spotify.Control;
 
 /// <summary>
-/// Drives the Spotify desktop app on this machine. Transport only: nothing is read back out of
-/// Spotify, and nothing sets its level — the room's Spotify volume is set in Spotify.
+/// Drives the Spotify desktop app on this machine. Nothing here sets its level — the room's
+/// Spotify volume is set in Spotify.
 /// </summary>
 public interface ISpotifyController
 {
     /// <summary>What this backend cannot do, for the Plugins page to say once at startup.</summary>
     string? Limitation { get; }
+
+    /// <summary>
+    /// What Spotify is doing right now, or null when this backend cannot see. Asked rather than
+    /// remembered: a host who put break music on themselves before the first singer was ready
+    /// would otherwise have the next command toggle them off.
+    /// </summary>
+    Task<SpotifyState?> GetStateAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Begins playback, loading <paramref name="contextUri"/> first when one is given. False when

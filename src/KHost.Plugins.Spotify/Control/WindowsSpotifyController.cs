@@ -10,11 +10,12 @@ namespace KHost.Plugins.Spotify.Control;
 /// without reading anything back out of the app.
 /// </summary>
 /// <remarks>
-/// Two consequences a host will meet. The keys are global, so they reach whichever app currently
-/// owns media focus — normally Spotify, but not guaranteed on a machine running another player.
-/// And Windows has a play/pause toggle and no discrete play or pause, so this tracks what it last
-/// commanded; a host who pauses in Spotify's own window puts that record out of step until the
-/// next start.
+/// The keys are global, so they reach whichever app currently owns media focus — normally
+/// Spotify, but not guaranteed on a machine running another player. Windows also has a
+/// play/pause toggle and no discrete play or pause, so a command has to know which way the
+/// toggle will land: <see cref="GetStateAsync"/> reads that from the system media session
+/// rather than remembering what was last sent, which is what keeps a host who pressed play in
+/// Spotify's own window from being toggled back off.
 /// </remarks>
 [SupportedOSPlatform("windows")]
 public sealed class WindowsSpotifyController : ISpotifyController
@@ -26,11 +27,11 @@ public sealed class WindowsSpotifyController : ISpotifyController
 
     private static readonly TimeSpan LaunchSettle = TimeSpan.FromSeconds(5);
 
+    /// <summary>Spotify's own session id on the system media transport.</summary>
+    internal const string SessionAppId = "Spotify.exe";
+
     private readonly ILogger _logger;
     private readonly bool _launchIfNotRunning;
-    private readonly Lock _gate = new();
-
-    private bool _playing;
 
     public WindowsSpotifyController(ILogger logger, bool launchIfNotRunning)
     {
@@ -56,11 +57,9 @@ public sealed class WindowsSpotifyController : ISpotifyController
 
             await Task.Delay(LaunchSettle, cancellationToken);
 
-            // The URI loads the playlist; whether it also starts is Spotify's call, so this is the
-            // one place the toggle is sent blind.
-            Send(MediaPlayPause);
-
-            lock (_gate) _playing = true;
+            // The URI loads the playlist; whether it also starts is Spotify's call, so settle and
+            // ask rather than sending a toggle that might stop what it just started.
+            await ToggleToAsync(SpotifyPlayback.Playing, cancellationToken);
 
             return true;
         }
@@ -79,29 +78,20 @@ public sealed class WindowsSpotifyController : ISpotifyController
             await Task.Delay(LaunchSettle, cancellationToken);
         }
 
-        Toggle(toPlaying: true);
+        await ToggleToAsync(SpotifyPlayback.Playing, cancellationToken);
 
         return true;
     }
 
     public Task PauseAsync(CancellationToken cancellationToken = default)
-    {
-        Toggle(toPlaying: false);
-        return Task.CompletedTask;
-    }
+        => ToggleToAsync(SpotifyPlayback.Paused, cancellationToken);
 
     public Task ResumeAsync(CancellationToken cancellationToken = default)
-    {
-        Toggle(toPlaying: true);
-        return Task.CompletedTask;
-    }
+        => ToggleToAsync(SpotifyPlayback.Playing, cancellationToken);
 
     public Task StopAsync(CancellationToken cancellationToken = default)
     {
         Send(MediaStop);
-
-        lock (_gate) _playing = false;
-
         return Task.CompletedTask;
     }
 
@@ -111,19 +101,76 @@ public sealed class WindowsSpotifyController : ISpotifyController
         return Task.CompletedTask;
     }
 
-    /// <summary>Sends the toggle only when the record says it would land the right way up.</summary>
-    private void Toggle(bool toPlaying)
+    /// <summary>
+    /// Decides whether the one key Windows offers would land the right way up. Unknown state
+    /// sends it: a backend that cannot see is no worse off than the old remembered flag, and
+    /// doing nothing would leave a host pressing play to silence.
+    /// </summary>
+    internal static bool ShouldSendToggle(SpotifyState? state, SpotifyPlayback target)
     {
-        lock (_gate)
-        {
-            if (_playing == toPlaying)
-                return;
+        if (state is null)
+            return true;
 
-            _playing = toPlaying;
-        }
+        // Stopped has nothing to resume, but the key is still the only way to try.
+        if (target == SpotifyPlayback.Playing)
+            return state.Playback != SpotifyPlayback.Playing;
 
-        Send(MediaPlayPause);
+        return state.Playback == SpotifyPlayback.Playing;
     }
+
+    private async Task ToggleToAsync(SpotifyPlayback target, CancellationToken cancellationToken)
+    {
+        var state = await GetStateAsync(cancellationToken);
+
+        if (ShouldSendToggle(state, target))
+            Send(MediaPlayPause);
+        else
+            _logger.LogDebug("Spotify is already {Target}; leaving the media key alone", target);
+    }
+
+#if WINDOWS_MEDIA_SESSION
+    /// <summary>
+    /// Reads Spotify's own row on the system media transport — the same one the volume flyout
+    /// shows. Filtered by session id rather than taking the current session, so another player
+    /// holding media focus reports as itself instead of being mistaken for Spotify.
+    /// </summary>
+    public async Task<SpotifyState?> GetStateAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var manager = await Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager
+                .RequestAsync().AsTask(cancellationToken);
+
+            var session = manager.GetSessions()
+                .FirstOrDefault(s => string.Equals(s.SourceAppUserModelId, SessionAppId, StringComparison.OrdinalIgnoreCase));
+
+            // No row at all means Spotify has never played this session, which is stopped.
+            if (session is null)
+                return SpotifyState.Stopped;
+
+            var playback = session.GetPlaybackInfo().PlaybackStatus switch
+            {
+                Windows.Media.Control.GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing => SpotifyPlayback.Playing,
+                Windows.Media.Control.GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused => SpotifyPlayback.Paused,
+                _ => SpotifyPlayback.Stopped,
+            };
+
+            var properties = await session.TryGetMediaPropertiesAsync().AsTask(cancellationToken);
+
+            return new SpotifyState(playback, properties?.Title, properties?.Artist);
+        }
+        catch (Exception ex)
+        {
+            // Null, not Stopped: "cannot see" and "is not playing" lead to different decisions.
+            _logger.LogDebug(ex, "Could not read Spotify's media session");
+            return null;
+        }
+    }
+#else
+    /// <summary>Built without the Windows media session projection, so nothing can be read back.</summary>
+    public Task<SpotifyState?> GetStateAsync(CancellationToken cancellationToken = default)
+        => Task.FromResult<SpotifyState?>(null);
+#endif
 
     private static bool IsRunning()
     {

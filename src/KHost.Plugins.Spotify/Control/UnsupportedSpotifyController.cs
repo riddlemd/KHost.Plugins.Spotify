@@ -15,6 +15,10 @@ public sealed class UnsupportedSpotifyController : ISpotifyController
     public Task<bool> StartAsync(string? contextUri, bool shuffle, CancellationToken cancellationToken = default)
         => Task.FromResult(false);
 
+    /// <summary>Stopped rather than null: nothing can play here, which is a definite answer.</summary>
+    public Task<SpotifyState?> GetStateAsync(CancellationToken cancellationToken = default)
+        => Task.FromResult<SpotifyState?>(SpotifyState.Stopped);
+
     public Task PauseAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task ResumeAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;

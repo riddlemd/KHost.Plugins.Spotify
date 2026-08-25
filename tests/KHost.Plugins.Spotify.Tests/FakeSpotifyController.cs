@@ -17,6 +17,15 @@ public sealed class FakeSpotifyController : ISpotifyController
     public string? StartedContextUri { get; private set; }
     public bool StartedWithShuffle { get; private set; }
 
+    /// <summary>What the backend reports. Null stands for a backend that cannot see.</summary>
+    public SpotifyState? State { get; set; } = SpotifyState.Stopped;
+
+    public Task<SpotifyState?> GetStateAsync(CancellationToken cancellationToken = default)
+    {
+        Calls.Add("state");
+        return Task.FromResult(State);
+    }
+
     public Task<bool> StartAsync(string? contextUri, bool shuffle, CancellationToken cancellationToken = default)
     {
         StartedContextUri = contextUri;

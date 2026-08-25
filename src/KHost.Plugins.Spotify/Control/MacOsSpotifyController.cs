@@ -49,6 +49,28 @@ public sealed class MacOsSpotifyController : ISpotifyController
         return await RunAsync(script, cancellationToken);
     }
 
+    /// <summary>
+    /// Stopped, not null, when Spotify is not running: the guard declining to start it is a
+    /// definite answer, unlike osascript failing to run at all.
+    /// </summary>
+    public async Task<SpotifyState?> GetStateAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await ProcessRunner.RunAsync("osascript", ["-e", MacOsScripts.State()], cancellationToken);
+
+            if (!result.Succeeded)
+                return null;
+
+            return MacOsScripts.ParseState(result.StandardOutput) ?? SpotifyState.Stopped;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not read Spotify's state");
+            return null;
+        }
+    }
+
     public Task PauseAsync(CancellationToken cancellationToken = default)
         => RunAsync(MacOsScripts.Pause(), cancellationToken);
 

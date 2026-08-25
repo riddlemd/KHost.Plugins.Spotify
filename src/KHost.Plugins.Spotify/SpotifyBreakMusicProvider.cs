@@ -52,20 +52,41 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
     public bool RendersThroughHost => false;
 
     /// <summary>
-    /// Always null: nothing is read back out of Spotify, so the console shows the bed as playing
-    /// without naming a track. Spotify's own window is where a host sees what is on.
+    /// The last track a command saw. A property cannot go and ask, so this is refreshed by the
+    /// transport calls rather than polled — the console names what is on without this provider
+    /// putting a timer on Spotify for a whole shift.
     /// </summary>
-    public BreakMusicTrack? CurrentTrack => null;
+    public BreakMusicTrack? CurrentTrack { get; private set; }
 
     public async Task<bool> StartAsync(CancellationToken cancellationToken = default)
     {
+        // Asked before anything is sent: a host who put Spotify on themselves while waiting for a
+        // first singer is already doing what was wanted, and the console should say so rather than
+        // the controller deciding on its own.
+        var before = await _controller.GetStateAsync(cancellationToken);
+
+        if (before?.Playback == SpotifyPlayback.Playing)
+        {
+            _logger.LogInformation("Spotify was already playing; leaving it as the host set it");
+            CurrentTrack = ToTrack(before);
+
+            return true;
+        }
+
         if (!await _controller.StartAsync(_contextUri, _shuffle, cancellationToken))
             return false;
+
+        CurrentTrack = ToTrack(await _controller.GetStateAsync(cancellationToken));
 
         _logger.LogInformation("Break music playing from Spotify");
 
         return true;
     }
+
+    internal static BreakMusicTrack? ToTrack(SpotifyState? state)
+        => string.IsNullOrWhiteSpace(state?.Title)
+            ? null
+            : new BreakMusicTrack { Title = state.Title, Artist = state.Artist ?? string.Empty };
 
     public Task PauseAsync(CancellationToken cancellationToken = default)
         => _controller.PauseAsync(cancellationToken);
