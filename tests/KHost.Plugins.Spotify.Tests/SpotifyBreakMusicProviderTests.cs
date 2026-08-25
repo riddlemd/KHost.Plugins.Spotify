@@ -53,6 +53,59 @@ public class SpotifyBreakMusicProviderTests
         Assert.Equal("Blue Monday", provider.CurrentTrack!.Title);
     }
 
+    // Skipping is the one command that changes what is playing. Without reading back, the console
+    // re-renders on the host's announcement and names the track that was just skipped past.
+    [Fact]
+    public async Task SkipAsync_Always_NamesTheTrackSkippedTo()
+    {
+        _controller.State = new SpotifyState(SpotifyPlayback.Playing, "Just like Heaven", "The Cure");
+
+        var provider = Build();
+        await provider.StartAsync();
+
+        _controller.State = new SpotifyState(SpotifyPlayback.Playing, "Walk Like an Egyptian", "The Bangles");
+        await provider.SkipAsync();
+
+        Assert.Equal("Walk Like an Egyptian", provider.CurrentTrack!.Title);
+        Assert.Equal("The Bangles", provider.CurrentTrack.Artist);
+    }
+
+    // A media key is asked for and answered later: the transport keeps reporting the old track for
+    // a moment after the skip lands. Taking the first read would name the track skipped past.
+    [Fact]
+    public async Task SkipAsync_TransportStillReportsTheOldTrack_WaitsForItToTurnOver()
+    {
+        var old = new SpotifyState(SpotifyPlayback.Playing, "Just like Heaven", "The Cure");
+        _controller.State = old;
+
+        var provider = Build();
+        await provider.StartAsync();
+
+        // Two more reads of the old track before it turns over.
+        _controller.QueuedStates.Enqueue(old);
+        _controller.QueuedStates.Enqueue(old);
+        _controller.State = new SpotifyState(SpotifyPlayback.Playing, "Walk Like an Egyptian", "The Bangles");
+
+        await provider.SkipAsync();
+
+        Assert.Equal("Walk Like an Egyptian", provider.CurrentTrack!.Title);
+    }
+
+    // A skip Spotify refuses never turns the track over, and the console cannot be held waiting
+    // for one that is not coming.
+    [Fact]
+    public async Task SkipAsync_TrackNeverTurnsOver_GivesUpAndKeepsWhatIsPlaying()
+    {
+        var same = new SpotifyState(SpotifyPlayback.Playing, "Just like Heaven", "The Cure");
+        _controller.State = same;
+
+        var provider = Build();
+        await provider.StartAsync();
+        await provider.SkipAsync();
+
+        Assert.Equal("Just like Heaven", provider.CurrentTrack!.Title);
+    }
+
     [Fact]
     public async Task StartAsync_SpotifyPaused_StartsItAsBefore()
     {
@@ -168,12 +221,35 @@ public class SpotifyBreakMusicProviderTests
         Assert.Equal(["resume"], _controller.Calls);
     }
 
+    // Reads bracket the skip: one for what it is leaving, one for what it landed on. The point of
+    // asserting the whole list is that nothing else — no play, pause or stop — goes with it.
     [Fact]
-    public async Task SkipAsync_SkipsToTheNextTrack()
+    public async Task SkipAsync_SkipsToTheNextTrackAndReadsBackWhatItLandedOn()
     {
         await Build().SkipAsync();
 
-        Assert.Equal(["skip"], _controller.Calls);
+        Assert.Equal(["state", "skip", "state"], _controller.Calls);
+    }
+
+    // Spotify moves on by itself as tracks end, so the console's own idea of what is playing may
+    // already be behind. Settling against it would stop on the track the skip was leaving.
+    [Fact]
+    public async Task SkipAsync_ConsoleIsBehindWhatSpotifyMovedToAlone_StillNamesWhatItSkippedTo()
+    {
+        _controller.State = new SpotifyState(SpotifyPlayback.Playing, "Call Me", "Blondie");
+
+        var provider = Build();
+        await provider.StartAsync();
+
+        // Spotify moved on with nothing asked of it; the console still shows Call Me.
+        _controller.State = new SpotifyState(SpotifyPlayback.Playing, "How Soon Is Now?", "The Smiths");
+        _controller.QueuedStates.Enqueue(_controller.State);          // the pre-skip read
+        _controller.QueuedStates.Enqueue(_controller.State);          // still turning over
+        _controller.State = new SpotifyState(SpotifyPlayback.Playing, "Manic Monday", "The Bangles");
+
+        await provider.SkipAsync();
+
+        Assert.Equal("Manic Monday", provider.CurrentTrack!.Title);
     }
 
     /// <summary>

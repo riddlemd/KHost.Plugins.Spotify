@@ -12,6 +12,11 @@ namespace KHost.Plugins.Spotify;
 /// </summary>
 public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
 {
+    /// <summary>Up to a second and a half, which is longer than Spotify has needed to turn a
+    /// track over here and short enough that a refused skip does not hold the console.</summary>
+    private static readonly TimeSpan SkipSettleInterval = TimeSpan.FromMilliseconds(150);
+    private const int SkipSettleAttempts = 10;
+
     private readonly ILogger<SpotifyBreakMusicProvider> _logger;
     private readonly ISpotifyController _controller;
     private readonly string? _contextUri;
@@ -102,8 +107,46 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
     public Task StopAsync(TimeSpan? fadeDuration = null, CancellationToken cancellationToken = default)
         => _controller.StopAsync(cancellationToken);
 
-    public Task SkipAsync(CancellationToken cancellationToken = default)
-        => _controller.SkipAsync(cancellationToken);
+    /// <summary>
+    /// Reads the track back afterwards: skipping is the one command that changes what is playing,
+    /// and the console re-renders on the host's own announcement — reading nothing here leaves it
+    /// naming the track that was skipped past.
+    /// </summary>
+    public async Task SkipAsync(CancellationToken cancellationToken = default)
+    {
+        // Read rather than taken from CurrentTrack: Spotify moves on by itself as tracks end, so
+        // what the console last showed may already be behind, and a settle that compared against
+        // it would stop on the track this skip was leaving.
+        var before = (await _controller.GetStateAsync(cancellationToken))?.Title;
+
+        await _controller.SkipAsync(cancellationToken);
+
+        CurrentTrack = ToTrack(await ReadSettledStateAsync(before, cancellationToken));
+    }
+
+    /// <summary>
+    /// Skipping is asked for and answered later, so a read taken straight afterwards still names
+    /// the track being skipped past. Polled rather than slept on a fixed delay: a machine that
+    /// turns the track over quickly is not made to wait for the worst case, and one that does not
+    /// still lands on the right name. A read with no track to name is taken as it comes — there is
+    /// nothing to wait for — and giving up returns the last read rather than the stale one.
+    /// </summary>
+    private async Task<SpotifyState?> ReadSettledStateAsync(string? previousTitle, CancellationToken cancellationToken)
+    {
+        SpotifyState? state = null;
+
+        for (var attempt = 0; attempt < SkipSettleAttempts; attempt++)
+        {
+            await Task.Delay(SkipSettleInterval, cancellationToken);
+
+            state = await _controller.GetStateAsync(cancellationToken);
+
+            if (state?.Title is not { Length: > 0 } title || title != previousTitle)
+                return state;
+        }
+
+        return state;
+    }
 
     /// <summary>
     /// Deliberately nothing. Spotify's level belongs to whoever set it there, and the host has no

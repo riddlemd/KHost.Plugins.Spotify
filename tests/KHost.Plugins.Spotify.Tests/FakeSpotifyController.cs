@@ -20,10 +20,17 @@ public sealed class FakeSpotifyController : ISpotifyController
     /// <summary>What the backend reports. Null stands for a backend that cannot see.</summary>
     public SpotifyState? State { get; set; } = SpotifyState.Stopped;
 
+    /// <summary>
+    /// Reads to hand out before falling back to <see cref="State"/>. Lets a test stand a transport
+    /// up that answers with the old track first, the way a real one does until a skip lands.
+    /// </summary>
+    public Queue<SpotifyState?> QueuedStates { get; } = new();
+
     public Task<SpotifyState?> GetStateAsync(CancellationToken cancellationToken = default)
     {
         Calls.Add("state");
-        return Task.FromResult(State);
+
+        return Task.FromResult(QueuedStates.Count > 0 ? QueuedStates.Dequeue() : State);
     }
 
     public Task<bool> StartAsync(string? contextUri, bool shuffle, CancellationToken cancellationToken = default)
