@@ -12,6 +12,9 @@ public sealed class UnsupportedSpotifyController : ISpotifyController
 
     public string? Limitation { get; }
 
+    /// <summary>Never raised: there is no backend here to watch.</summary>
+    public event EventHandler? PlaybackChanged { add { } remove { } }
+
     public Task<bool> StartAsync(string? contextUri, bool shuffle, CancellationToken cancellationToken = default)
         => Task.FromResult(false);
 

@@ -30,6 +30,13 @@ public sealed class MacOsSpotifyController : ISpotifyController
 
     public string? Limitation => null;
 
+    /// <summary>
+    /// Never raised. Spotify posts com.spotify.client.PlaybackStateChanged as a distributed
+    /// notification, which is what this would listen to; until then the host asks rather than
+    /// being told, and only misses a change the host made in Spotify's own window.
+    /// </summary>
+    public event EventHandler? PlaybackChanged { add { } remove { } }
+
     public async Task<bool> StartAsync(string? contextUri, bool shuffle, CancellationToken cancellationToken = default)
     {
         var script = MacOsScripts.Play(contextUri, shuffle);

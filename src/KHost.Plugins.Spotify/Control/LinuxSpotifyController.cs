@@ -32,6 +32,13 @@ public sealed class LinuxSpotifyController : ISpotifyController
 
     public string? Limitation => null;
 
+    /// <summary>
+    /// Never raised. MPRIS emits PropertiesChanged on the session bus, which a long-lived
+    /// gdbus monitor would relay; until then the host asks rather than being told, and only
+    /// misses a change the host made in Spotify's own window.
+    /// </summary>
+    public event EventHandler? PlaybackChanged { add { } remove { } }
+
     public async Task<bool> StartAsync(string? contextUri, bool shuffle, CancellationToken cancellationToken = default)
     {
         if (!await PlayAsync(contextUri, shuffle, cancellationToken))

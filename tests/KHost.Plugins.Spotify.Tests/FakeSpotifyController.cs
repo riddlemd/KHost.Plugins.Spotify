@@ -12,6 +12,11 @@ public sealed class FakeSpotifyController : ISpotifyController
 
     public string? Limitation { get; set; }
 
+    public event EventHandler? PlaybackChanged;
+
+    /// <summary>Stands in for Spotify moving without being asked.</summary>
+    public void RaisePlaybackChanged() => PlaybackChanged?.Invoke(this, EventArgs.Empty);
+
     public bool CanStart { get; set; } = true;
 
     public string? StartedContextUri { get; private set; }

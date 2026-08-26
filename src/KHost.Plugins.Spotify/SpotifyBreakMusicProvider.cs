@@ -1,3 +1,5 @@
+using KHost.Plugins.Sdk.Messaging;
+using KHost.Plugins.Sdk.Messaging.Messages;
 using KHost.Plugins.Sdk.Models;
 using KHost.Plugins.Sdk.Services;
 using KHost.Plugins.Spotify.Control;
@@ -18,19 +20,25 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
     private const int SkipSettleAttempts = 10;
 
     private readonly ILogger<SpotifyBreakMusicProvider> _logger;
+    private readonly IMessageBroker? _broker;
     private readonly ISpotifyController _controller;
     private readonly string? _contextUri;
     private readonly bool _shuffle;
 
-    public SpotifyBreakMusicProvider(ILogger<SpotifyBreakMusicProvider> logger, IPluginContext context)
-        : this(logger, context, controller: null)
+    public SpotifyBreakMusicProvider(
+        ILogger<SpotifyBreakMusicProvider> logger, IPluginContext context, IMessageBroker broker)
+        : this(logger, context, controller: null, broker)
     {
     }
 
     internal SpotifyBreakMusicProvider(
-        ILogger<SpotifyBreakMusicProvider> logger, IPluginContext context, ISpotifyController? controller)
+        ILogger<SpotifyBreakMusicProvider> logger,
+        IPluginContext context,
+        ISpotifyController? controller,
+        IMessageBroker? broker = null)
     {
         _logger = logger;
+        _broker = broker;
 
         var settings = context.BindSettings<SpotifySettings>();
 
@@ -48,6 +56,32 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
 
         if (_controller.Limitation is { } limitation)
             context.ReportWarning(limitation);
+
+        // Relayed onto the broker, which is how the SDK says a provider reports moving on its own.
+        // The host re-reads on it, so this carries no payload of its own.
+        _controller.PlaybackChanged += (_, _) => _broker?.Announce(new BreakMusicTrackChanged(SourceName));
+
+        // Fire and forget: the console must not wait on another app to finish starting, and a
+        // watch that never binds only costs the live display, not the host's ability to ask.
+        _ = _controller.StartWatchingAsync();
+    }
+
+    /// <summary>Whatever Spotify says, so the host need not have started it to know about it.</summary>
+    public async Task<BreakMusicPlayback?> ReadPlaybackAsync(CancellationToken cancellationToken = default)
+    {
+        var state = await _controller.GetStateAsync(cancellationToken);
+
+        if (state is null)
+            return null;
+
+        CurrentTrack = ToTrack(state) ?? CurrentTrack;
+
+        return state.Playback switch
+        {
+            SpotifyPlayback.Playing => BreakMusicPlayback.Playing,
+            SpotifyPlayback.Paused => BreakMusicPlayback.Paused,
+            _ => BreakMusicPlayback.Stopped,
+        };
     }
 
     public string DisplayName => "Spotify";

@@ -39,6 +39,8 @@ public sealed class WindowsSpotifyController : ISpotifyController
         _launchIfNotRunning = launchIfNotRunning;
     }
 
+    public event EventHandler? PlaybackChanged;
+
     public string? Limitation =>
         "On Windows the media keys reach whichever app currently owns media focus, which is "
         + "Spotify only while nothing else is playing.";
@@ -129,6 +131,63 @@ public sealed class WindowsSpotifyController : ISpotifyController
     }
 
 #if WINDOWS_MEDIA_SESSION
+    /// <summary>
+    /// Held for the life of this controller: the session raises nothing once it is collected, and
+    /// a watch that stops after the first garbage collection is worse than no watch at all.
+    /// </summary>
+    private Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager? _sessionManager;
+    private Windows.Media.Control.GlobalSystemMediaTransportControlsSession? _watchedSession;
+
+    /// <summary>
+    /// Subscribes to Spotify's own row on the system media transport, so a host pressing pause in
+    /// Spotify's window or on the keyboard reaches the console without anything polling all shift.
+    /// Sessions come and go with the app, so the manager is watched too and the session re-bound.
+    /// </summary>
+    public async Task StartWatchingAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            _sessionManager = await Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager
+                .RequestAsync().AsTask(cancellationToken);
+
+            _sessionManager.SessionsChanged += (_, _) => RebindSession();
+
+            RebindSession();
+        }
+        catch (Exception ex)
+        {
+            // Without a watch the host still asks before every decision; only the live display is lost.
+            _logger.LogDebug(ex, "Could not watch Spotify's media session");
+        }
+    }
+
+    private void RebindSession()
+    {
+        try
+        {
+            var session = _sessionManager?.GetSessions()
+                .FirstOrDefault(s => string.Equals(s.SourceAppUserModelId, SessionAppId, StringComparison.OrdinalIgnoreCase));
+
+            if (ReferenceEquals(session, _watchedSession))
+                return;
+
+            _watchedSession = session;
+
+            if (session is null)
+                return;
+
+            session.PlaybackInfoChanged += (_, _) => PlaybackChanged?.Invoke(this, EventArgs.Empty);
+            session.MediaPropertiesChanged += (_, _) => PlaybackChanged?.Invoke(this, EventArgs.Empty);
+
+            // Spotify appearing at all is itself news: it may have come up already playing.
+            PlaybackChanged?.Invoke(this, EventArgs.Empty);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not bind to Spotify's media session");
+        }
+    }
+
     /// <summary>
     /// Reads Spotify's own row on the system media transport — the same one the volume flyout
     /// shows. Filtered by session id rather than taking the current session, so another player
