@@ -27,6 +27,12 @@ public sealed class WindowsSpotifyController : ISpotifyController
 
     private static readonly TimeSpan LaunchSettle = TimeSpan.FromSeconds(5);
 
+    /// <summary>Wide enough to swallow a pair raised a millisecond apart, short enough that the
+    /// console still follows the room.</summary>
+    private static readonly TimeSpan CoalesceWindow = TimeSpan.FromMilliseconds(250);
+
+    private int _raiseGeneration;
+
     /// <summary>Spotify's own session id on the system media transport.</summary>
     internal const string SessionAppId = "Spotify.exe";
 
@@ -176,16 +182,40 @@ public sealed class WindowsSpotifyController : ISpotifyController
             if (session is null)
                 return;
 
-            session.PlaybackInfoChanged += (_, _) => PlaybackChanged?.Invoke(this, EventArgs.Empty);
-            session.MediaPropertiesChanged += (_, _) => PlaybackChanged?.Invoke(this, EventArgs.Empty);
+            session.PlaybackInfoChanged += (_, _) => RaiseCoalesced();
+            session.MediaPropertiesChanged += (_, _) => RaiseCoalesced();
 
             // Spotify appearing at all is itself news: it may have come up already playing.
-            PlaybackChanged?.Invoke(this, EventArgs.Empty);
+            RaiseCoalesced();
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Could not bind to Spotify's media session");
         }
+    }
+
+    /// <summary>
+    /// One turn of a track raises both of the events above, about a millisecond apart, and each
+    /// one costs the host a read. Only the last raise in a window gets through, so a subscriber
+    /// hears once per change rather than once per event.
+    /// </summary>
+    /// <remarks>
+    /// Trailing edge, not leading: the second event of a pair is the one carrying the settled
+    /// track, and dropping it would report the change a beat early with the old name. A counter
+    /// rather than a timer, so there is nothing to dispose on a controller that lives as long as
+    /// the process.
+    /// </remarks>
+    private void RaiseCoalesced()
+    {
+        var generation = Interlocked.Increment(ref _raiseGeneration);
+
+        _ = Task.Delay(CoalesceWindow).ContinueWith(
+            _ =>
+            {
+                if (Volatile.Read(ref _raiseGeneration) == generation)
+                    PlaybackChanged?.Invoke(this, EventArgs.Empty);
+            },
+            TaskScheduler.Default);
     }
 
     /// <summary>
