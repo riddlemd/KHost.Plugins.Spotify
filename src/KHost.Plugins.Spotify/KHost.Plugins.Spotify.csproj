@@ -9,6 +9,12 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <!-- The Windows target needs its reference pack resolved explicitly off Windows, or the whole
+       build fails NETSDK1100 - including the plain target, which has nothing to do with it. -->
+  <PropertyGroup Condition="!$([MSBuild]::IsOSPlatform('Windows'))">
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0'">
     <DefineConstants>$(DefineConstants);WINDOWS_MEDIA_SESSION</DefineConstants>
     <!-- The host is a plain net10.0 process, so it carries no WinRT projection of its own. A
