@@ -45,6 +45,9 @@
 
   <ItemGroup>
     <Content Include="manifest.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Shipped with the plugin rather than fetched: the extension and the socket it speaks to are
+         one protocol, and a host running a version of each is the failure nobody can diagnose. -->
+    <Content Include="extension\khost-bridge.js" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!-- Dev convenience: drop the built plugin into a sibling KHost checkout's runtime plugins

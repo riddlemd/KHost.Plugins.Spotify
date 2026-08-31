@@ -2,6 +2,7 @@ using KHost.Plugins.Sdk.Messaging;
 using KHost.Plugins.Sdk.Messaging.Messages;
 using KHost.Plugins.Sdk.Models;
 using KHost.Plugins.Sdk.Services;
+using KHost.Plugins.Spotify.Bridge;
 using KHost.Plugins.Spotify.Control;
 using Microsoft.Extensions.Logging;
 
@@ -22,6 +23,7 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
     private readonly ILogger<SpotifyBreakMusicProvider> _logger;
     private readonly IMessageBroker? _broker;
     private readonly ISpotifyController _controller;
+    private readonly SpicetifyBridge? _bridge;
     private readonly string? _contextUri;
     private readonly bool _shuffle;
 
@@ -45,7 +47,23 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
         _contextUri = SpotifyUri.Normalize(settings.PlaylistUri);
         _shuffle = settings.Shuffle;
 
-        _controller = controller ?? SpotifyControllerFactory.ForCurrentPlatform(logger, settings.LaunchIfNotRunning);
+        var platform = controller ?? SpotifyControllerFactory.ForCurrentPlatform(logger, settings.LaunchIfNotRunning);
+
+        if (settings.SpicetifyBridge && controller is null)
+        {
+            _bridge = new SpicetifyBridge(logger, settings.SpicetifyBridgePort);
+            _bridge.Start();
+
+            platform = new BridgedSpotifyController(
+                platform, _bridge, TimeSpan.FromMilliseconds(Math.Max(0, settings.FadeMilliseconds)));
+
+            context.ReportWarning(
+                "Fading break music needs the KHost bridge extension, which ships beside this plugin "
+                + $"as extension/khost-bridge.js. Without it Spotify starts and stops at full level. "
+                + $"The bridge is listening on 127.0.0.1:{settings.SpicetifyBridgePort}.");
+        }
+
+        _controller = platform;
 
         if (!string.IsNullOrWhiteSpace(settings.PlaylistUri) && _contextUri is null)
         {
