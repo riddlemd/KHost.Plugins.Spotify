@@ -12,7 +12,7 @@
     { "key": "shuffle", "type": "bool", "label": "Shuffle the playlist", "default": true },
     { "key": "launchIfNotRunning", "type": "bool", "label": "Launch Spotify if it is not already running", "default": true },
     { "key": "spicetifyBridge", "type": "bool", "label": "Listen for the KHost Spicetify extension (enables fading)", "default": true },
-    { "key": "spicetifyBridgePort", "type": "number", "label": "Port the extension connects on (loopback only)", "default": 8974 },
-    { "key": "fadeMilliseconds", "type": "number", "label": "Fade length in milliseconds (0 turns fading off)", "default": 1500 }
+    { "key": "spicetifyBridgePort", "type": "int", "label": "Port the extension connects on (loopback only)", "default": 8974 },
+    { "key": "fadeMilliseconds", "type": "int", "label": "Fade length in milliseconds (0 turns fading off)", "default": 1500 }
   ]
 }
