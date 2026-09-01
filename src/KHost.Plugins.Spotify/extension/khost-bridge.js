@@ -5,10 +5,9 @@
 // the client a ramp is a loop, so this is where the fade lives; KHost drives it over a loopback
 // socket and falls back to the platform backend whenever this is not attached.
 //
-// Install: copy to the Spicetify extensions folder, then
-//     spicetify config extensions khost-bridge.js
-//     spicetify backup apply
-// The KHost Plugins page reports the path and whether this is attached.
+// The plugin installs and registers this itself when it finds Spicetify, so a host installs
+// Spicetify and nothing else. Editing this copy does nothing: the plugin overwrites it whenever
+// the file beside the assembly differs from the one Spicetify holds.
 
 (function KHostBridge() {
   const PORT = Number(localStorage.getItem('khost.bridge.port')) || 8974;

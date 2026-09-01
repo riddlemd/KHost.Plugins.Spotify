@@ -57,10 +57,20 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
             platform = new BridgedSpotifyController(
                 platform, _bridge, TimeSpan.FromMilliseconds(Math.Max(0, settings.FadeMilliseconds)));
 
-            context.ReportWarning(
-                "Fading break music needs the KHost bridge extension, which ships beside this plugin "
-                + $"as extension/khost-bridge.js. Without it Spotify starts and stops at full level. "
-                + $"The bridge is listening on 127.0.0.1:{settings.SpicetifyBridgePort}.");
+            if (SpicetifyInstallation.FindCli() is { } cli)
+            {
+                // Off the constructor: this patches Spotify and restarts it on the first run, which
+                // is far too slow to hold up the host starting. It settles long before a break.
+                _ = Task.Run(() => InstallExtensionAsync(cli));
+            }
+            else
+            {
+                context.ReportWarning(
+                    "Break music fades in and out only on a machine with Spicetify installed — it is "
+                    + "what lets KHost reach Spotify's own volume. Without it break music still plays, "
+                    + "but it starts and stops at full level. Install Spicetify from spicetify.app and "
+                    + "restart KHost; the rest is set up for you.");
+            }
         }
 
         _controller = platform;
@@ -206,4 +216,33 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
     /// </summary>
     public Task SetVolumeAsync(float volume, CancellationToken cancellationToken = default)
         => Task.CompletedTask;
+
+    /// <summary>
+    /// Nothing here is fatal: the bridge only ever added fading on top of a platform backend that
+    /// works without it, so a Spicetify that cannot be written to costs a fade, not break music.
+    /// </summary>
+    private async Task InstallExtensionAsync(string cliPath)
+    {
+        try
+        {
+            if (SpicetifyInstallation.Discover() is not { } installation)
+            {
+                _logger.LogInformation("Spicetify is installed but has never been run, so there is nothing to install the bridge into");
+                return;
+            }
+
+            await new SpicetifyExtensionInstaller(_logger).EnsureInstalledAsync(installation, ShippedExtensionPath, cliPath);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not install the KHost bridge extension into Spicetify");
+        }
+    }
+
+    /// <summary>The copy beside this assembly, not the host's base directory — a plugin runs out of
+    /// its own folder under plugins/.</summary>
+    private static string ShippedExtensionPath => Path.Combine(
+        Path.GetDirectoryName(typeof(SpotifyBreakMusicProvider).Assembly.Location) ?? string.Empty,
+        "extension",
+        SpicetifyInstallation.ExtensionFileName);
 }
