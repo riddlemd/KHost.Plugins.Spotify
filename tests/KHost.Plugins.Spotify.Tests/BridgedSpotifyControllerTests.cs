@@ -329,6 +329,51 @@ public class BridgedSpotifyControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task SkippingAfterTheHostTurnedSpotifyUpThemselves_IsAPlainSkip()
+    {
+        await using var extension = await AttachAsync();
+
+        await FadeOutAsync(extension);
+
+        // Turned up and played in Spotify's own window. Nothing asked this end, and the level it
+        // last set is no longer the level the room is at.
+        await extension.SendAsync("""{"type":"state","playing":true,"title":"Regulate","volume":0.7}""");
+        await WaitForAsync(() => _bridge.LastState?.Volume > 0.5f);
+
+        await _controller.SkipAsync();
+
+        // Nothing goes out for the skip: fading in here would drop a room already at level down to
+        // silence for the length of a ramp.
+        var pausing = _controller.PauseAsync();
+        Assert.Contains("\"type\":\"pauseWithFadeOut\"", await extension.NextAsync());
+
+        await extension.SendAsync("""{"type":"faded","to":0,"paused":true}""");
+        await pausing;
+
+        Assert.Contains("skip", _inner.Calls);
+    }
+
+    [Fact]
+    public async Task SkippingInARoomThisEndNeverSilenced_StillComesBackUp()
+    {
+        await using var extension = await AttachAsync();
+
+        // Nothing here faded it out — this is KHost restarting over break music the host had
+        // already taken down, so the extension's report is the only thing that knows.
+        await extension.SendAsync("""{"type":"state","playing":false,"title":"Regulate","volume":0}""");
+        await WaitForAsync(() => _bridge.LastState is not null);
+
+        var skipping = _controller.SkipAsync();
+
+        Assert.Contains("\"type\":\"playWithFadeIn\"", await extension.NextAsync());
+
+        await extension.SendAsync("""{"type":"faded","to":0.62,"playing":true}""");
+        await skipping;
+
+        Assert.Contains("skip", _inner.Calls);
+    }
+
+    [Fact]
     public async Task SkippingAfterAResume_IsAPlainSkipAgain()
     {
         await using var extension = await AttachAsync();

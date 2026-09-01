@@ -18,11 +18,15 @@ public sealed class BridgedSpotifyController : ISpotifyController
     private readonly SpicetifyBridge _bridge;
     private readonly TimeSpan _fade;
 
+    /// <summary>Anything at or under this is silence. Loose, because Spotify rounds what it reports.</summary>
+    private const float Silence = 0.005f;
+
     /// <summary>
-    /// Whether a fade out left Spotify's level at zero. Held because the level alone cannot say
-    /// so — a host who pulled the slider down themselves is not something to fade back up from.
+    /// Whether Spotify's level is sitting at zero. Believed from what this end last asked for, and
+    /// corrected by what the extension reports: a host who turned the volume up in Spotify's own
+    /// window told nobody here, and the client is the only thing that saw it.
     /// </summary>
-    private bool _silenced;
+    private volatile bool _silenced;
 
     public BridgedSpotifyController(ISpotifyController inner, SpicetifyBridge bridge, TimeSpan fade)
     {
@@ -30,7 +34,15 @@ public sealed class BridgedSpotifyController : ISpotifyController
         _bridge = bridge;
         _fade = fade;
 
-        _bridge.StateReceived += (_, state) => PlaybackChanged?.Invoke(this, EventArgs.Empty);
+        _bridge.StateReceived += (_, state) =>
+        {
+            // Read from inside the client, so it outranks anything believed here — including a room
+            // this end never silenced, which is what a restart over already-quiet break music looks
+            // like.
+            _silenced = state.Volume <= Silence;
+
+            PlaybackChanged?.Invoke(this, EventArgs.Empty);
+        };
     }
 
     /// <summary>
@@ -151,7 +163,7 @@ public sealed class BridgedSpotifyController : ISpotifyController
         if (!_bridge.IsConnected || !await _bridge.SetVolumeAsync(level, cancellationToken))
             return false;
 
-        _silenced = level <= 0f;
+        _silenced = level <= Silence;
 
         return true;
     }
