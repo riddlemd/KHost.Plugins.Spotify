@@ -1,4 +1,4 @@
-using KHost.Plugins.Sdk.Services;
+using KHost.Abstractions.Services;
 using KHost.Plugins.Spotify;
 using KHost.Plugins.Spotify.Control;
 using Microsoft.Extensions.Logging.Abstractions;

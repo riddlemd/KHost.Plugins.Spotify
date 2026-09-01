@@ -33,8 +33,15 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Sibling checkout of the KHost repo; swap for the KHost.Plugins.Sdk NuGet package once published. -->
-    <ProjectReference Include="..\..\..\KHost\src\KHost.Plugins.Sdk\KHost.Plugins.Sdk.csproj" />
+    <!-- Sibling checkout of the KHost repo; swap for NuGet packages once published. Both are MIT,
+         so referencing them puts no PolyForm code in what this plugin redistributes. -->
+    <ProjectReference Include="..\..\..\KHost\src\KHost.Abstractions\KHost.Abstractions.csproj" />
+    <ProjectReference Include="..\..\..\KHost\src\KHost.Common\KHost.Common.csproj" />
+
+    <!-- Came in through KHost.Plugins.Sdk before it was folded into Abstractions, which declares
+         contracts and takes no packages of its own. The host has this loaded, so a shipped copy
+         is never the one used. -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.7" />
   </ItemGroup>
 
   <ItemGroup>

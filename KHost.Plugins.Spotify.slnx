@@ -1,7 +1,8 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/KHost.Plugins.Spotify/KHost.Plugins.Spotify.csproj" />
-    <Project Path="../KHost/src/KHost.Plugins.Sdk/KHost.Plugins.Sdk.csproj" />
+    <Project Path="../KHost/src/KHost.Abstractions/KHost.Abstractions.csproj" />
+    <Project Path="../KHost/src/KHost.Common/KHost.Common.csproj" />
   </Folder>
 
   <Folder Name="/tests/">

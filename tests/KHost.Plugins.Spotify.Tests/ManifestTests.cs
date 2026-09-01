@@ -1,5 +1,5 @@
-using KHost.Plugins.Sdk;
-using KHost.Plugins.Sdk.Models;
+using KHost.Abstractions.Models.Plugins;
+using KHost.Abstractions.Models;
 using System.Text.Json;
 
 namespace KHost.Plugins.Spotify.Tests;
