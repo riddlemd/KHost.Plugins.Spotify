@@ -5,6 +5,7 @@
   "version": "1.0.0",
   "author": "KHost",
   "description": "Plays break music through the Spotify desktop app on this machine.",
+  "icon": "music-note-beamed",
   "entryAssembly": "KHost.Plugins.Spotify.dll",
   "apiVersion": 1,
   "settings": [
