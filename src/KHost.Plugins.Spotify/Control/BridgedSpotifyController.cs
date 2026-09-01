@@ -24,6 +24,12 @@ public sealed class BridgedSpotifyController : ISpotifyController
     /// </summary>
     private float _baseline = 1f;
 
+    /// <summary>
+    /// Whether a fade out left Spotify's level at zero. Held because the level alone cannot say
+    /// so — a host who pulled the slider down themselves is not something to fade back up from.
+    /// </summary>
+    private bool _silenced;
+
     public BridgedSpotifyController(ISpotifyController inner, SpicetifyBridge bridge, TimeSpan fade)
     {
         _inner = inner;
@@ -64,14 +70,18 @@ public sealed class BridgedSpotifyController : ISpotifyController
     {
         var silenced = _bridge.IsConnected && await _bridge.SetVolumeAsync(0f, cancellationToken);
 
+        _silenced = silenced;
+
         if (!await _inner.StartAsync(contextUri, shuffle, cancellationToken))
         {
             // Nothing started, so the silence just set would be permanent.
             if (silenced) await _bridge.SetVolumeAsync(_baseline, cancellationToken);
+            _silenced = false;
             return false;
         }
 
-        if (silenced) await _bridge.FadeAsync(_baseline, _fade, cancellationToken);
+        if (silenced && await _bridge.FadeAsync(_baseline, _fade, cancellationToken))
+            _silenced = false;
 
         return true;
     }
@@ -83,7 +93,10 @@ public sealed class BridgedSpotifyController : ISpotifyController
     public async Task PauseAsync(CancellationToken cancellationToken = default)
     {
         if (_bridge.IsConnected && await _bridge.PauseWithFadeOutAsync(_fade, cancellationToken))
+        {
+            _silenced = true;
             return;
+        }
 
         await _inner.PauseAsync(cancellationToken);
     }
@@ -91,7 +104,10 @@ public sealed class BridgedSpotifyController : ISpotifyController
     public async Task ResumeAsync(CancellationToken cancellationToken = default)
     {
         if (_bridge.IsConnected && await _bridge.PlayWithFadeInAsync(_fade, cancellationToken))
+        {
+            _silenced = false;
             return;
+        }
 
         await _inner.ResumeAsync(cancellationToken);
     }
@@ -106,12 +122,26 @@ public sealed class BridgedSpotifyController : ISpotifyController
 
         await _inner.StopAsync(cancellationToken);
 
-        if (faded) await _bridge.SetVolumeAsync(_baseline, cancellationToken);
+        if (faded && await _bridge.SetVolumeAsync(_baseline, cancellationToken))
+            _silenced = false;
     }
 
-    /// <summary>Not faded: a skip is meant to be heard as one, and the next track starts at level.</summary>
-    public Task SkipAsync(CancellationToken cancellationToken = default)
-        => _inner.SkipAsync(cancellationToken);
+    /// <summary>
+    /// Not faded while the music is up: a skip is meant to be heard as one, and the next track
+    /// starts at level. Skipping out of a fade out is the exception — the backend's next track
+    /// resumes a paused client, so without coming back up the new song plays to an empty room.
+    /// </summary>
+    public async Task SkipAsync(CancellationToken cancellationToken = default)
+    {
+        await _inner.SkipAsync(cancellationToken);
+
+        if (!_silenced || !_bridge.IsConnected) return;
+
+        // The same command a resume uses: it is already the one that starts from silence and comes
+        // back to the level the fade out was taken from, which is not a level this end holds.
+        if (await _bridge.PlayWithFadeInAsync(_fade, cancellationToken))
+            _silenced = false;
+    }
 
     /// <summary>
     /// The venue's level, which the backend alone cannot apply. The extension takes it as the level
@@ -121,7 +151,12 @@ public sealed class BridgedSpotifyController : ISpotifyController
     {
         _baseline = Math.Clamp(volume, 0f, 1f);
 
-        return _bridge.IsConnected && await _bridge.SetVolumeAsync(_baseline, cancellationToken);
+        if (!_bridge.IsConnected || !await _bridge.SetVolumeAsync(_baseline, cancellationToken))
+            return false;
+
+        _silenced = _baseline <= 0f;
+
+        return true;
     }
 
 }

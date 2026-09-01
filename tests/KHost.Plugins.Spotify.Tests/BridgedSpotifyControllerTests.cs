@@ -210,6 +210,66 @@ public class BridgedSpotifyControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task SkippingWhileFadedOut_ComesBackUpRatherThanPlayingToAnEmptyRoom()
+    {
+        await using var extension = await AttachAsync();
+
+        await FadeOutAsync(extension);
+
+        var skipping = _controller.SkipAsync();
+
+        // The backend's next track resumes a paused client, and the level is still where the fade
+        // out left it — so without this the new song plays and the room hears nothing.
+        Assert.Contains("\"type\":\"playWithFadeIn\"", await extension.NextAsync());
+
+        await extension.SendAsync("""{"type":"faded","to":0.62,"playing":true}""");
+        await skipping;
+
+        Assert.Contains("skip", _inner.Calls);
+    }
+
+    [Fact]
+    public async Task SkippingWhileTheMusicIsUp_IsStillHeardAsASkip()
+    {
+        await using var extension = await AttachAsync();
+
+        await _controller.SkipAsync();
+
+        // Nothing goes out for the skip itself, so the next thing the extension hears is the pause
+        // that follows it rather than a ramp over a track already at level.
+        var pausing = _controller.PauseAsync();
+        Assert.Contains("\"type\":\"pauseWithFadeOut\"", await extension.NextAsync());
+
+        await extension.SendAsync("""{"type":"faded","to":0,"paused":true}""");
+        await pausing;
+
+        Assert.Contains("skip", _inner.Calls);
+    }
+
+    [Fact]
+    public async Task SkippingAfterAResume_IsAPlainSkipAgain()
+    {
+        await using var extension = await AttachAsync();
+
+        await FadeOutAsync(extension);
+
+        var resuming = _controller.ResumeAsync();
+        await extension.NextAsync();
+        await extension.SendAsync("""{"type":"faded","to":0.62,"playing":true}""");
+        await resuming;
+
+        await _controller.SkipAsync();
+
+        // The music is back up, so the skip is the ordinary one: a second fade in here would ramp
+        // a track that is already playing at level.
+        var pausing = _controller.PauseAsync();
+        Assert.Contains("\"type\":\"pauseWithFadeOut\"", await extension.NextAsync());
+
+        await extension.SendAsync("""{"type":"faded","to":0,"paused":true}""");
+        await pausing;
+    }
+
+    [Fact]
     public async Task AnAttachedExtensionThatRefusesTheCommand_StillGetsThePauseThroughTheBackend()
     {
         await using var extension = await AttachAsync();
@@ -262,6 +322,15 @@ public class BridgedSpotifyControllerTests : IDisposable
         var extension = await FakeExtension.ConnectAsync(_port);
         await WaitForAsync(() => _bridge.IsConnected);
         return extension;
+    }
+
+    /// <summary>Leaves the room where a pause between singers does: silent, paused, and level zero.</summary>
+    private async Task FadeOutAsync(FakeExtension extension)
+    {
+        var pausing = _controller.PauseAsync();
+        await extension.NextAsync();
+        await extension.SendAsync("""{"type":"faded","to":0,"paused":true}""");
+        await pausing;
     }
 
     private static async Task WaitForAsync(Func<bool> condition)
