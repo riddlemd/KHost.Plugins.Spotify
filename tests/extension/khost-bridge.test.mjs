@@ -147,6 +147,77 @@ test('pauseWithFadeOut then playWithFadeIn is a round trip back to the exact ori
   assert.deepEqual(lastFaded(ext), { type: 'faded', to: 0.42, playing: true });
 });
 
+// ── the host's own hand on Spotify's slider ────────────────────────────────────────
+
+test('a level the host raised in Spotify itself is the one play comes up to, not the stale one', async (t) => {
+  // The reported case: the extension attached while Spotify happened to be muted, so the level it
+  // had to come back to was zero. Raising the volume in Spotify's own window told it nothing, and
+  // pressing play faded the room back down to silence.
+  const ext = connectExtension({ volume: 0, playing: false });
+  t.after(() => ext.dispose());
+
+  ext.player.volume = 0.7;
+
+  ext.socket.receive('{"type":"playWithFadeIn","ms":32}');
+  await ext.clock.drain();
+
+  assert.equal(ext.player.volume, 0.7);
+  assert.equal(ext.player.playing, true);
+  assert.deepEqual(lastFaded(ext), { type: 'faded', to: 0.7, playing: true });
+});
+
+test('a pause part way through a fade in does not take the level it interrupted as the room\'s', async (t) => {
+  // Every level on a ramp is one this extension wrote, and adopting one walks the room down: a
+  // singer cutting a fade in short would leave break music quieter for the rest of the night.
+  const ext = connectExtension({ volume: 0.8, playing: true });
+  t.after(() => ext.dispose());
+
+  ext.socket.receive('{"type":"pauseWithFadeOut","ms":16}');
+  await ext.clock.drain();
+
+  ext.socket.receive('{"type":"playWithFadeIn","ms":64}');   // 4 steps back up to 0.8
+  assert.ok(ext.player.volume > 0 && ext.player.volume < 0.8, 'caught part way up');
+
+  ext.socket.receive('{"type":"pauseWithFadeOut","ms":16}'); // cuts it short
+  await ext.clock.drain();
+
+  ext.socket.receive('{"type":"playWithFadeIn","ms":16}');
+  await ext.clock.drain();
+
+  assert.equal(ext.player.volume, 0.8);
+});
+
+test('a silence with no ramp to it is still a level we wrote, and is not adopted afterwards', async (t) => {
+  // ms:0 is the start path: quiet before the backend loads a playlist, with nothing to hear. A
+  // write that goes unrecorded reads back as the host having chosen silence, and everything after
+  // it comes back to zero.
+  const ext = connectExtension({ volume: 0.45, playing: true });
+  t.after(() => ext.dispose());
+
+  ext.socket.receive('{"type":"silence","ms":0}');
+  await ext.clock.drain();
+  assert.equal(ext.player.volume, 0);
+
+  ext.socket.receive('{"type":"playWithFadeIn","ms":16}');
+  await ext.clock.drain();
+
+  assert.equal(ext.player.volume, 0.45);
+});
+
+test('a host who lowers Spotify while it plays is followed, not overridden on the next fade', async (t) => {
+  const ext = connectExtension({ volume: 0.9, playing: true });
+  t.after(() => ext.dispose());
+
+  ext.player.volume = 0.25;
+
+  ext.socket.receive('{"type":"pauseWithFadeOut","ms":16}');
+  await ext.clock.drain();
+  ext.socket.receive('{"type":"playWithFadeIn","ms":16}');
+  await ext.clock.drain();
+
+  assert.equal(ext.player.volume, 0.25);
+});
+
 // ── invalid input is dropped, not substituted ───────────────────────────────────────
 
 const droppedCases = [

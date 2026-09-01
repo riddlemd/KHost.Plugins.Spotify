@@ -36,6 +36,24 @@
   // what it reports, so restoring a reading walks the room's level down a point every time.
   let previous = startingVolume;
 
+  // The level this extension last wrote. Anything else the player reports is the host's own hand
+  // on Spotify's slider, which is the only place the room's level is ever really set.
+  let ours = startingVolume;
+
+  function write(to) {
+    ours = to;
+    Spicetify.Player.setVolume(to);
+  }
+
+  // Adopts a level the host set themselves. Compared against what we wrote rather than against
+  // zero: a fade leaves levels of its own behind, and taking one of those makes the room come back
+  // to a point part way up a ramp, or to the silence a fade out ended on. Loose, because the level
+  // Spotify reports back is a rounding of the one it was given.
+  function noteHostLevel() {
+    const now = Spicetify.Player.getVolume();
+    if (Math.abs(now - ours) > 0.005) previous = now;
+  }
+
   // Null when the level is not a number to begin with. Dropped rather than substituted, because
   // Math.max(0, undefined) is NaN, and a NaN reaching the player also becomes the level every
   // later fade in comes back to.
@@ -101,16 +119,13 @@
   function setLevel(to) {
     cancelFade();
     previous = to;
-    Spicetify.Player.setVolume(to);
+    write(to);
     send({ type: 'faded', to });
   }
 
-  // Remembers the level being left, so whatever comes back up lands on what the room was actually
-  // set to. Guarded because a level already at zero is one an earlier fade out put there — taking
-  // that would make silence itself the level everything returns to.
+  // Remembers the level being left, so whatever comes back up lands on what the room was set to.
   async function fadeOut(ms) {
-    const from = Spicetify.Player.getVolume();
-    if (from > 0.005) previous = from;
+    noteHostLevel();
 
     return ramp(0, ms);
   }
@@ -138,7 +153,7 @@
 
     const from = Spicetify.Player.getVolume();
     if (ms === 0 || Math.abs(to - from) < 0.005) {
-      Spicetify.Player.setVolume(to);
+      write(to);
       return true;
     }
 
@@ -147,7 +162,7 @@
 
     for (let i = 1; i <= steps; i++) {
       if (mine !== fadeToken) return false;
-      Spicetify.Player.setVolume(from + (to - from) * (i / steps));
+      write(from + (to - from) * (i / steps));
       await new Promise((r) => setTimeout(r, ms / steps));
     }
 
@@ -168,7 +183,11 @@
 
   // Silent before it plays, or the first instant arrives at full level and the fade is decoration.
   async function playWithFadeIn(ms) {
-    Spicetify.Player.setVolume(0);
+    // Before the silence, or the reading is one we just wrote. A host who turned Spotify up while
+    // it sat paused has set the room's level, and pressing play must come up to it.
+    noteHostLevel();
+
+    write(0);
 
     if (!Spicetify.Player.isPlaying()) Spicetify.Player.play();
 
