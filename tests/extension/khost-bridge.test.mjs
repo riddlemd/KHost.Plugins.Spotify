@@ -218,6 +218,48 @@ test('a host who lowers Spotify while it plays is followed, not overridden on th
   assert.equal(ext.player.volume, 0.25);
 });
 
+test('a fade out after the host moved the slider starts from where the room actually is', async (t) => {
+  const ext = connectExtension({ volume: 0.6, playing: true });
+  t.after(() => ext.dispose());
+
+  ext.player.volume = 0.2; // pulled down in Spotify's own window
+
+  ext.socket.receive('{"type":"pauseWithFadeOut","ms":64}'); // 4 steps
+  await ext.clock.drain();
+
+  // A ramp that began at the level we merely remembered would jump the room up to it before
+  // taking it down, which is the opposite of what a fade out is for.
+  assert.ok(
+    ext.player.setCalls.every((v) => v <= 0.2 + 1e-9),
+    `stepped above the room's level: ${ext.player.setCalls}`,
+  );
+  assert.equal(ext.player.volume, 0);
+});
+
+test('a fade in ramps even when the player still reports the level it has not applied yet', async (t) => {
+  // The real client reports the old level for a moment after setVolume. A ramp that reads its
+  // starting point back off the player therefore sees the level it just left, and either skips
+  // the fade entirely (when that equals the target) or runs it from the wrong end — which is a
+  // fade in that audibly starts at full and drops.
+  const ext = connectExtension({ volume: 0.6, playing: false });
+  t.after(() => ext.dispose());
+
+  ext.player.getVolume = () => 0.6;
+
+  ext.socket.receive('{"type":"pauseWithFadeOut","ms":16}');
+  await ext.clock.drain();
+  assert.equal(ext.player.volume, 0);
+
+  ext.player.setCalls.length = 0;
+  ext.socket.receive('{"type":"playWithFadeIn","ms":64}');   // 4 steps up
+  await ext.clock.drain();
+
+  // The silence, then a step per frame — not one jump straight to the target.
+  assert.ok(ext.player.setCalls.length >= 5, `expected a ramp, got ${ext.player.setCalls.length} writes`);
+  assert.ok(ext.player.setCalls[1] > 0 && ext.player.setCalls[1] < 0.6, 'starts from the silence it wrote');
+  assert.equal(ext.player.volume, 0.6);
+});
+
 // ── invalid input is dropped, not substituted ───────────────────────────────────────
 
 const droppedCases = [

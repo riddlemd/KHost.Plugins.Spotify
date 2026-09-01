@@ -51,7 +51,10 @@
   // Spotify reports back is a rounding of the one it was given.
   function noteHostLevel() {
     const now = Spicetify.Player.getVolume();
-    if (Math.abs(now - ours) > 0.005) previous = now;
+
+    // Both: the level is the room's to come back to, and it is now the last level known to be
+    // real, which is what a ramp starts from.
+    if (Math.abs(now - ours) > 0.005) previous = ours = now;
   }
 
   // Null when the level is not a number to begin with. Dropped rather than substituted, because
@@ -151,7 +154,12 @@
     cancelFade();
     const mine = fadeToken;
 
-    const from = Spicetify.Player.getVolume();
+    // What we last wrote, not what the player reports: a read taken straight after a write comes
+    // back with the level Spotify has yet to apply, so a fade in from silence saw the level it had
+    // just left and either skipped the ramp or ran it from the wrong end. The host moving the
+    // slider is picked up by noteHostLevel instead, which is the only thing that can tell.
+    const from = ours;
+
     if (ms === 0 || Math.abs(to - from) < 0.005) {
       write(to);
       return true;
