@@ -19,12 +19,6 @@ public sealed class BridgedSpotifyController : ISpotifyController
     private readonly TimeSpan _fade;
 
     /// <summary>
-    /// Only what a start comes up to. The level a fade returns to is the extension's to hold — it
-    /// knows the float it last set, where a reading back from Spotify comes rounded.
-    /// </summary>
-    private float _baseline = 1f;
-
-    /// <summary>
     /// Whether a fade out left Spotify's level at zero. Held because the level alone cannot say
     /// so — a host who pulled the slider down themselves is not something to fade back up from.
     /// </summary>
@@ -68,19 +62,21 @@ public sealed class BridgedSpotifyController : ISpotifyController
     /// </summary>
     public async Task<bool> StartAsync(string? contextUri, bool shuffle, CancellationToken cancellationToken = default)
     {
-        var silenced = _bridge.IsConnected && await _bridge.SetVolumeAsync(0f, cancellationToken);
+        // Waited for rather than fired off: a playlist that loads while the level is still up is
+        // heard as a burst of it before the fade in has begun.
+        var silenced = _bridge.IsConnected && await _bridge.SilenceAsync(TimeSpan.Zero, cancellationToken);
 
         _silenced = silenced;
 
         if (!await _inner.StartAsync(contextUri, shuffle, cancellationToken))
         {
             // Nothing started, so the silence just set would be permanent.
-            if (silenced) await _bridge.SetVolumeAsync(_baseline, cancellationToken);
+            if (silenced) await _bridge.RestoreAsync(TimeSpan.Zero, cancellationToken);
             _silenced = false;
             return false;
         }
 
-        if (silenced && await _bridge.FadeAsync(_baseline, _fade, cancellationToken))
+        if (silenced && await _bridge.RestoreAsync(_fade, cancellationToken))
             _silenced = false;
 
         return true;
@@ -114,15 +110,16 @@ public sealed class BridgedSpotifyController : ISpotifyController
 
     /// <summary>
     /// Stopping is the backend's — the extension can pause a client but not end a session — so the
-    /// fade is asked for on its own and the level put back while it is silent.
+    /// fade is asked for on its own and the room's own level put back while it is silent, rather
+    /// than Spotify being left muted for whoever reaches for it next.
     /// </summary>
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
-        var faded = _bridge.IsConnected && await _bridge.FadeAsync(0f, _fade, cancellationToken);
+        var faded = _bridge.IsConnected && await _bridge.SilenceAsync(_fade, cancellationToken);
 
         await _inner.StopAsync(cancellationToken);
 
-        if (faded && await _bridge.SetVolumeAsync(_baseline, cancellationToken))
+        if (faded && await _bridge.RestoreAsync(TimeSpan.Zero, cancellationToken))
             _silenced = false;
     }
 
@@ -149,12 +146,12 @@ public sealed class BridgedSpotifyController : ISpotifyController
     /// </summary>
     public async Task<bool> SetVolumeAsync(float volume, CancellationToken cancellationToken = default)
     {
-        _baseline = Math.Clamp(volume, 0f, 1f);
+        var level = Math.Clamp(volume, 0f, 1f);
 
-        if (!_bridge.IsConnected || !await _bridge.SetVolumeAsync(_baseline, cancellationToken))
+        if (!_bridge.IsConnected || !await _bridge.SetVolumeAsync(level, cancellationToken))
             return false;
 
-        _silenced = _baseline <= 0f;
+        _silenced = level <= 0f;
 
         return true;
     }

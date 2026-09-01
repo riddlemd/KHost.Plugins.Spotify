@@ -181,13 +181,95 @@ public class BridgedSpotifyControllerTests : IDisposable
 
         var starting = _controller.StartAsync(null, shuffle: false);
 
-        Assert.Contains("\"type\":\"volume\"", await extension.NextAsync());   // silence first
+        var silencing = await extension.NextAsync();
+        Assert.Contains("\"type\":\"silence\"", silencing);
         await extension.SendAsync("""{"type":"faded","to":0}""");
 
-        Assert.Contains("\"type\":\"fade\"", await extension.NextAsync());     // then up
-        await extension.SendAsync("""{"type":"faded","to":1}""");
+        var coming = await extension.NextAsync();
+        Assert.Contains("\"type\":\"restore\"", coming);
+        await extension.SendAsync("""{"type":"faded","to":0.4}""");
+
+        // Neither carries a level. The way back is the room's own setting, which lives in Spotify
+        // and has never been told to this end — a level sent from here could only be a guess, and
+        // the guess was full volume.
+        Assert.DoesNotContain("\"to\"", silencing);
+        Assert.DoesNotContain("\"to\"", coming);
+
+        // Down instantly, up over the fade: the silence is only there to cover the moment the
+        // playlist loads, and it is the way back that the room is meant to hear.
+        Assert.Contains("\"ms\":0", silencing);
+        Assert.Contains("\"ms\":40", coming);
 
         await starting;
+    }
+
+    [Fact]
+    public async Task TheSilenceIsAcknowledgedBeforeTheBackendIsAskedToStart()
+    {
+        await using var extension = await AttachAsync();
+
+        var starting = _controller.StartAsync(null, shuffle: false);
+        await extension.NextAsync();
+
+        // A playlist that loads while the level is still up is heard as a burst of it, so the
+        // backend is not asked until the room is actually quiet.
+        await Task.Delay(150);
+        Assert.DoesNotContain("start", _inner.Calls);
+
+        await extension.SendAsync("""{"type":"faded","to":0}""");
+        await extension.NextAsync();
+        await extension.SendAsync("""{"type":"faded","to":0.4}""");
+        await starting;
+
+        Assert.Contains("start", _inner.Calls);
+    }
+
+    [Fact]
+    public async Task StoppingFadesOutAndLeavesTheRoomsOwnLevelWhereItWasFound()
+    {
+        await using var extension = await AttachAsync();
+
+        var stopping = _controller.StopAsync();
+
+        var silencing = await extension.NextAsync();
+        Assert.Contains("\"type\":\"silence\"", silencing);
+
+        // The other way round from a start: this is the fade the room hears, and the way back is
+        // bookkeeping over a Spotify that has already been stopped.
+        Assert.Contains("\"ms\":40", silencing);
+        await extension.SendAsync("""{"type":"faded","to":0}""");
+
+        // Put back while it is silent, or Spotify is left muted for whoever reaches for it next —
+        // and put back to what it was, not to a level this end picked.
+        var restoring = await extension.NextAsync();
+        Assert.Contains("\"type\":\"restore\"", restoring);
+        Assert.DoesNotContain("\"to\"", restoring);
+        Assert.Contains("\"ms\":0", restoring);
+
+        await extension.SendAsync("""{"type":"faded","to":0.4}""");
+        await stopping;
+
+        Assert.Contains("stop", _inner.Calls);
+    }
+
+    [Fact]
+    public async Task AStartTheBackendRefuses_DoesNotLeaveTheRoomSilent()
+    {
+        _inner.CanStart = false;
+
+        await using var extension = await AttachAsync();
+
+        var starting = _controller.StartAsync(null, shuffle: false);
+
+        Assert.Contains("\"type\":\"silence\"", await extension.NextAsync());
+        await extension.SendAsync("""{"type":"faded","to":0}""");
+
+        // Nothing started, so the silence just set would be permanent — and Spotify would be mute
+        // the next time the host reached for it themselves.
+        Assert.Contains("\"type\":\"restore\"", await extension.NextAsync());
+        await extension.SendAsync("""{"type":"faded","to":0.4}""");
+
+        Assert.False(await starting);
     }
 
     [Fact]

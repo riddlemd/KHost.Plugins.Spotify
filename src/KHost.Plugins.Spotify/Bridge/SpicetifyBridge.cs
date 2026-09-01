@@ -89,12 +89,20 @@ public sealed class SpicetifyBridge : IDisposable
         => RampAsync(new { type = "playWithFadeIn", ms = (int)over.TotalMilliseconds }, over, cancellationToken);
 
     /// <summary>
-    /// A ramp with nothing on the end of it, for the two moves that have no paired command: coming
-    /// up from silence after the backend has started a playlist, and going down before it ends a
-    /// session. Neither is something the extension can do on its own.
+    /// Goes quiet, remembering the level being left. The half of a fade out with no pause on the
+    /// end of it, for the two moves the extension cannot make on its own: the backend is about to
+    /// load a playlist or end a session, and only it can do either.
     /// </summary>
-    public Task<bool> FadeAsync(float to, TimeSpan over, CancellationToken cancellationToken = default)
-        => RampAsync(new { type = "fade", to, ms = (int)over.TotalMilliseconds }, over, cancellationToken);
+    public Task<bool> SilenceAsync(TimeSpan over, CancellationToken cancellationToken = default)
+        => RampAsync(new { type = "silence", ms = (int)over.TotalMilliseconds }, over, cancellationToken);
+
+    /// <summary>
+    /// Back to the level the silence was taken from, which is the other half. Carries no level for
+    /// the same reason <see cref="PlayWithFadeInAsync"/> does not: the room's setting is Spotify's
+    /// to hold and this end has never been told it.
+    /// </summary>
+    public Task<bool> RestoreAsync(TimeSpan over, CancellationToken cancellationToken = default)
+        => RampAsync(new { type = "restore", ms = (int)over.TotalMilliseconds }, over, cancellationToken);
 
     /// <summary>
     /// Sends a command that takes time at the far end and waits for it to say so. The await covers

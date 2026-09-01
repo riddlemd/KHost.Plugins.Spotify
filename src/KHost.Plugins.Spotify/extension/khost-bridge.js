@@ -105,14 +105,32 @@
     send({ type: 'faded', to });
   }
 
-  async function fade(to, ms) {
-    // Silent when superseded: the plugin takes the first acknowledgement as the answer to what it
-    // last asked, so one for a level the room never settled at unblocks the wrong caller.
-    if (await ramp(to, ms)) send({ type: 'faded', to });
+  // Remembers the level being left, so whatever comes back up lands on what the room was actually
+  // set to. Guarded because a level already at zero is one an earlier fade out put there — taking
+  // that would make silence itself the level everything returns to.
+  async function fadeOut(ms) {
+    const from = Spicetify.Player.getVolume();
+    if (from > 0.005) previous = from;
+
+    return ramp(0, ms);
   }
 
-  // The ramp itself, with no message on the end: the three commands that use it each have their
-  // own thing to say once it lands. False when a newer command took over part way, which the
+  // The two halves with no transport on the end of them: going quiet before the backend loads a
+  // playlist or ends a session, and coming back once it has. Neither carries a level — out is
+  // always to silence, and back is always to what silence was taken from.
+  //
+  // Silent when superseded: the plugin takes the first acknowledgement as the answer to what it
+  // last asked, so one for a level the room never settled at unblocks the wrong caller.
+  async function silence(ms) {
+    if (await fadeOut(ms)) send({ type: 'faded', to: 0 });
+  }
+
+  async function restore(ms) {
+    if (await ramp(previous, ms)) send({ type: 'faded', to: previous });
+  }
+
+  // The ramp itself, with no message on the end: each command that uses it has its own thing to
+  // say once it lands. False when a newer command took over part way, which the
   // caller has to honour — its own work is as superseded as the writes were.
   async function ramp(to, ms) {
     cancelFade();
@@ -136,16 +154,12 @@
     return true;
   }
 
-  // Faded out and paused as one act. Remembering the level here, before the ramp, is what makes
-  // the fade back in land on what the room was actually set to.
+  // Faded out and paused as one act.
   async function pauseWithFadeOut(ms) {
-    const from = Spicetify.Player.getVolume();
-    if (from > 0.005) previous = from;
-
     // Nothing after this point if a newer command took over: pausing would stop playback the
     // newer command never asked to interrupt, at whatever level it had just set, while claiming
     // the room had reached silence.
-    if (!await ramp(0, ms)) return;
+    if (!await fadeOut(ms)) return;
 
     if (Spicetify.Player.isPlaying()) Spicetify.Player.pause();
 
@@ -169,7 +183,8 @@
   const COMMANDS = Object.assign(Object.create(null), {
     pauseWithFadeOut: (ask, ms) => pauseWithFadeOut(ms),
     playWithFadeIn: (ask, ms) => playWithFadeIn(ms),
-    fade: (ask, ms) => { const to = level(ask.to); if (to !== null) fade(to, ms); },
+    silence: (ask, ms) => silence(ms),
+    restore: (ask, ms) => restore(ms),
     volume: (ask) => { const to = level(ask.to); if (to !== null) setLevel(to); },
   });
 
