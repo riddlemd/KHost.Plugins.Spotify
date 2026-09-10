@@ -35,8 +35,13 @@
   <ItemGroup>
     <!-- Sibling checkout of the KHost repo; swap for NuGet packages once published. Both are MIT,
          so referencing them puts no PolyForm code in what this plugin redistributes. -->
-    <ProjectReference Include="..\..\..\KHost\src\KHost.Abstractions\KHost.Abstractions.csproj" />
-    <ProjectReference Include="..\..\..\KHost\src\KHost.Common\KHost.Common.csproj" />
+    <!-- The published contracts, not a sibling checkout: this repo used to fail to build whenever
+         the KHost checkout beside it changed branch, and an outside author has no such checkout at
+         all. ExcludeAssets="runtime" because the host already has both in its default context and
+         PluginLoadContext.Load returns null for anything that is, so a copy shipped beside the
+         plugin is never the one loaded. -->
+    <PackageReference Include="KHost.Abstractions" Version="0.1.0" ExcludeAssets="runtime" />
+    <PackageReference Include="KHost.Common" Version="0.1.0" ExcludeAssets="runtime" />
 
     <!-- Came in through KHost.Plugins.Sdk before it was folded into Abstractions, which declares
          contracts and takes no packages of its own. The host has this loaded, so a shipped copy
