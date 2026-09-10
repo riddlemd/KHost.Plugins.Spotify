@@ -31,11 +31,4 @@
   </ItemGroup>
 
 
-  <ItemGroup>
-    <!-- With runtime assets, which the plugin itself excludes: a test host stands in for KHost and
-         has to load the contracts, where the plugin must never carry a copy of them. -->
-    <PackageReference Include="KHost.Abstractions" Version="0.1.0" />
-    <PackageReference Include="KHost.Common" Version="0.1.0" />
-  </ItemGroup>
-
 </Project>
