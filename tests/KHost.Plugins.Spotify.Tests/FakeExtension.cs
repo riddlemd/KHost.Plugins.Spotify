@@ -14,14 +14,36 @@ public sealed class FakeExtension : IAsyncDisposable
 
     private FakeExtension(ClientWebSocket socket) => _socket = socket;
 
-    public static async Task<FakeExtension> ConnectAsync(int port)
+    /// <param name="ready">
+    /// Whether to say the player is usable, which the real extension says the moment it opens the
+    /// socket. False stands in for the extension that loads into a Spotify whose Spicetify never
+    /// bound to it: attached, and able to do nothing.
+    /// </param>
+    public static async Task<FakeExtension> ConnectAsync(int port, bool ready = true)
     {
         var socket = new ClientWebSocket();
 
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await socket.ConnectAsync(new Uri($"ws://127.0.0.1:{port}/khost"), timeout.Token);
 
-        return new FakeExtension(socket);
+        var extension = new FakeExtension(socket);
+
+        // Sent before the caller gets it, because nothing the bridge does for an extension happens
+        // until one has said it can work — the same order the real extension keeps. The caller
+        // waits for the bridge to have read it; only the caller can see the bridge.
+        await extension.SendAsync(Diagnosis(ready));
+
+        return extension;
+    }
+
+    /// <summary>The report the real extension opens with, as the bridge expects to read it.</summary>
+    public static string Diagnosis(bool ready)
+    {
+        const string PlayerThrew = "Cannot read properties of undefined (reading '_volume')";
+
+        return ready
+            ? """{"type":"diagnosis","ready":true,"waitedMs":0,"spicetify":true,"player":true,"platformKeys":40,"error":null}"""
+            : $$"""{"type":"diagnosis","ready":false,"waitedMs":30000,"spicetify":true,"player":false,"platformKeys":0,"error":"{{PlayerThrew}}"}""";
     }
 
     public Task SendAsync(string json) => _socket.SendAsync(

@@ -112,7 +112,7 @@ class FakeWebSocket {
 /// A real client's getVolume is a function on the player before the player can serve it, and
 /// throws until it can. `throwsUntil` reproduces that: the extension has to keep waiting rather
 /// than take defined for ready.
-export function loadExtension({ volume = 0.5, playing = false, port = null, throwsUntil = 0 } = {}) {
+export function loadExtension({ volume = 0.5, playing = false, port = null, throwsUntil = 0, platformKeys = 3 } = {}) {
   const player = {
     volume,
     playing,
@@ -151,7 +151,12 @@ export function loadExtension({ volume = 0.5, playing = false, port = null, thro
     getItem: (key) => (key === 'khost.bridge.port' && port !== null ? String(port) : null),
     setItem: () => {},
   };
-  globalThis.Spicetify = { Player: player };
+  // Spicetify's own API, which arrives populated. Zero keys is the shape of a Spicetify that
+  // patched Spotify and then never bound to it — the fault the diagnosis exists to name.
+  const platform = {};
+  for (let i = 0; i < platformKeys; i++) platform['Api' + i] = {};
+
+  globalThis.Spicetify = { Player: player, Platform: platform };
   globalThis.WebSocket = class extends FakeWebSocket {
     constructor(url) {
       super(url, sentMessages);
@@ -192,4 +197,8 @@ export function connectExtension(options) {
 
 export function lastFaded(ext) {
   return ext.sentMessages.filter((m) => m.type === 'faded').at(-1);
+}
+
+export function diagnoses(ext) {
+  return ext.sentMessages.filter((m) => m.type === 'diagnosis');
 }

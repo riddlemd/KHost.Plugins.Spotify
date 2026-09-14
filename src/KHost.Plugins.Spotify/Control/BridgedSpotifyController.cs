@@ -50,9 +50,12 @@ public sealed class BridgedSpotifyController : ISpotifyController
         // never told a track had turned over, whatever the backend underneath noticed.
         _inner.PlaybackChanged += (_, _) =>
         {
-            // The bridge outranks it when attached: that one is told, this one polls, and two
-            // announcements for one change cost the host two re-reads and two redraws.
-            if (!_bridge.IsConnected)
+            // The bridge outranks it when it can actually see: that one is told, this one polls,
+            // and two announcements for one change cost the host two re-reads and two redraws.
+            // Asked of readiness rather than attachment, or an extension that loaded and cannot
+            // run silences the backend that still works — which is how track changes went missing
+            // once already.
+            if (!_bridge.IsReady)
                 PlaybackChanged?.Invoke(this, EventArgs.Empty);
         };
     }
@@ -61,7 +64,7 @@ public sealed class BridgedSpotifyController : ISpotifyController
     /// Only the backend's own limits are reported while an extension is attached, since the one it
     /// answers for — no fading — is the thing the extension is there to fix.
     /// </summary>
-    public string? Limitation => _bridge.IsConnected ? null : _inner.Limitation;
+    public string? Limitation => _bridge.IsReady ? null : _inner.Limitation;
 
     public event EventHandler? PlaybackChanged;
 
@@ -74,7 +77,7 @@ public sealed class BridgedSpotifyController : ISpotifyController
     /// </summary>
     public async Task<SpotifyState?> GetStateAsync(CancellationToken cancellationToken = default)
     {
-        if (_bridge.IsConnected && _bridge.LastState is { } state)
+        if (_bridge.IsReady && _bridge.LastState is { } state)
             return state.ToSpotifyState();
 
         return await _inner.GetStateAsync(cancellationToken);
@@ -88,7 +91,7 @@ public sealed class BridgedSpotifyController : ISpotifyController
     {
         // Waited for rather than fired off: a playlist that loads while the level is still up is
         // heard as a burst of it before the fade in has begun.
-        var silenced = _bridge.IsConnected && await _bridge.SilenceAsync(TimeSpan.Zero, cancellationToken);
+        var silenced = _bridge.IsReady && await _bridge.SilenceAsync(TimeSpan.Zero, cancellationToken);
 
         _silenced = silenced;
 
@@ -112,7 +115,7 @@ public sealed class BridgedSpotifyController : ISpotifyController
     /// </summary>
     public async Task PauseAsync(CancellationToken cancellationToken = default)
     {
-        if (_bridge.IsConnected && await _bridge.PauseWithFadeOutAsync(_fade, cancellationToken))
+        if (_bridge.IsReady && await _bridge.PauseWithFadeOutAsync(_fade, cancellationToken))
         {
             _silenced = true;
             return;
@@ -123,7 +126,7 @@ public sealed class BridgedSpotifyController : ISpotifyController
 
     public async Task ResumeAsync(CancellationToken cancellationToken = default)
     {
-        if (_bridge.IsConnected && await _bridge.PlayWithFadeInAsync(_fade, cancellationToken))
+        if (_bridge.IsReady && await _bridge.PlayWithFadeInAsync(_fade, cancellationToken))
         {
             _silenced = false;
             return;
@@ -139,7 +142,7 @@ public sealed class BridgedSpotifyController : ISpotifyController
     /// </summary>
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
-        var faded = _bridge.IsConnected && await _bridge.SilenceAsync(_fade, cancellationToken);
+        var faded = _bridge.IsReady && await _bridge.SilenceAsync(_fade, cancellationToken);
 
         await _inner.StopAsync(cancellationToken);
 
@@ -156,7 +159,7 @@ public sealed class BridgedSpotifyController : ISpotifyController
     {
         await _inner.SkipAsync(cancellationToken);
 
-        if (!_silenced || !_bridge.IsConnected) return;
+        if (!_silenced || !_bridge.IsReady) return;
 
         // The same command a resume uses: it is already the one that starts from silence and comes
         // back to the level the fade out was taken from, which is not a level this end holds.
@@ -172,7 +175,7 @@ public sealed class BridgedSpotifyController : ISpotifyController
     {
         var level = Math.Clamp(volume, 0f, 1f);
 
-        if (!_bridge.IsConnected || !await _bridge.SetVolumeAsync(level, cancellationToken))
+        if (!_bridge.IsReady || !await _bridge.SetVolumeAsync(level, cancellationToken))
             return false;
 
         _silenced = level <= Silence;

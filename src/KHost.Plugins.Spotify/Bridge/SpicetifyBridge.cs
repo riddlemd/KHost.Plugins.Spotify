@@ -46,6 +46,19 @@ public sealed class SpicetifyBridge : IDisposable
     public SpicetifyState? LastState { get; private set; }
 
     /// <summary>
+    /// What the attached extension last said about its own health, or null while nothing has said
+    /// anything. Sent on every connection, so a host that outlives a Spotify restart is told again.
+    /// </summary>
+    public SpicetifyDiagnosis? LastDiagnosis { get; private set; }
+
+    /// <summary>
+    /// Attached <b>and</b> able to drive Spotify. This, not <see cref="IsConnected"/>, is what a
+    /// caller wanting a fade has to ask: the extension opens the socket before it knows whether it
+    /// can work, so an attached one may be able to do nothing at all.
+    /// </summary>
+    public bool IsReady => IsConnected && LastDiagnosis is { Ready: true };
+
+    /// <summary>
     /// Begins listening. Never throws: a port already taken is a bridge that does not run, not a
     /// plugin that fails to load, and break music still works through the ordinary backend.
     /// </summary>
@@ -202,6 +215,7 @@ public sealed class SpicetifyBridge : IDisposable
         // One extension at a time: there is one Spotify. A second connection replaces the first,
         // which is what a reconnect after a Spotify restart looks like from here.
         _client = stream;
+        LastDiagnosis = null;
         _logger.LogInformation("Spicetify extension attached");
 
         try
@@ -249,6 +263,11 @@ public sealed class SpicetifyBridge : IDisposable
                 case "state" when SpicetifyState.Parse(received.Payload) is { } state:
                     LastState = state;
                     StateReceived?.Invoke(this, state);
+                    break;
+
+                case "diagnosis" when SpicetifyDiagnosis.Parse(received.Payload) is { } diagnosis:
+                    LastDiagnosis = diagnosis;
+                    _logger.LogInformation("Spicetify extension reports {Diagnosis}", diagnosis.Describe());
                     break;
             }
         }

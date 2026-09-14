@@ -14,31 +14,67 @@
   const RECONNECT_MIN = 1000;
   const RECONNECT_MAX = 15000;
 
-  // Spicetify injects extensions before its own API is ready, so every extension waits. Polled
-  // rather than hooked because there is no event for it.
-  //
-  // Ready means able to answer, not merely defined: getVolume is a function on the player well
-  // before the player can serve it, and calling it early throws. That throw killed this extension
-  // outright — it never reached connect(), and the host saw only a bridge nothing attached to.
-  let startingVolume = null;
-  try { startingVolume = Spicetify.Player && Spicetify.Player.getVolume(); } catch (e) { /* not yet */ }
-
-  if (!window.Spicetify || !Spicetify.Player || typeof startingVolume !== 'number') {
-    setTimeout(KHostBridge, 250);
-    return;
-  }
+  // How long the player is given before its silence is called a fault rather than a slow start.
+  // Generous: this is competing with Spotify finishing its own boot, not with anything of ours.
+  const PLAYER_WAIT_MS = 30000;
+  const PLAYER_POLL_MS = 250;
 
   let socket = null;
   let backoff = RECONNECT_MIN;
   let fadeToken = 0;
 
+  // Whether the player can actually be driven. Everything below the socket depends on it; the
+  // socket itself deliberately does not.
+  let ready = false;
+
+  // What went wrong while waiting, as the host will be asked to explain it to somebody.
+  let waitedMs = 0;
+  let lastError = '';
+
   // The level to come back up to. Held here rather than read back before each fade: Spotify rounds
   // what it reports, so restoring a reading walks the room's level down a point every time.
-  let previous = startingVolume;
+  let previous = 1;
 
   // The level this extension last wrote. Anything else the player reports is the host's own hand
   // on Spotify's slider, which is the only place the room's level is ever really set.
-  let ours = startingVolume;
+  let ours = 1;
+
+  // Read rather than assumed, and the one call that says whether the player is up: getVolume is a
+  // function on the player well before the player can serve it, and calling it early throws.
+  function readVolume() {
+    try {
+      const v = window.Spicetify && Spicetify.Player && Spicetify.Player.getVolume();
+
+      lastError = '';
+
+      return typeof v === 'number' && isFinite(v) ? v : null;
+    } catch (e) {
+      lastError = String((e && e.message) || e).slice(0, 120);
+
+      return null;
+    }
+  }
+
+  // Everything the host needs to explain a bridge that is attached and cannot work. Sent on every
+  // connection and again the moment the answer changes, so a host that started first still learns
+  // it — and sent from in here because this is the only code on the inside of the client, which is
+  // what makes the explanation the same on every operating system.
+  function sendDiagnosis() {
+    const S = window.Spicetify;
+
+    send({
+      type: 'diagnosis',
+      ready: ready,
+      waitedMs: waitedMs,
+      spicetify: !!S,
+      player: !!(S && S.Player),
+      // Spicetify's API arrives as a populated Platform. An empty one that stays empty is the
+      // signature of a Spicetify older than the Spotify it patched: it patches without error and
+      // then never binds, so every extension loads and none of them can do anything.
+      platformKeys: (S && S.Platform) ? Object.keys(S.Platform).length : -1,
+      error: lastError || null,
+    });
+  }
 
   function write(to) {
     ours = to;
@@ -71,7 +107,9 @@
 
     socket.onopen = () => {
       backoff = RECONNECT_MIN;
-      report();
+      sendDiagnosis();
+
+      if (ready) report();
     };
 
     socket.onmessage = (event) => {
@@ -82,7 +120,14 @@
 
       // Anything unrecognised is dropped rather than answered: a newer plugin talking to an older
       // extension is a version pair a host can end up with, and it should degrade quietly.
-      if (run) run(ask, Math.max(0, ask.ms | 0));
+      if (!run) return;
+
+      // A command arriving before the player is up is answered rather than attempted. The host
+      // gates on the diagnosis and should not be sending one, but a race at startup is cheap to
+      // absorb and a thrown command would leave whoever asked waiting for an acknowledgement.
+      if (!ready) return sendDiagnosis();
+
+      run(ask, Math.max(0, ask.ms | 0));
     };
 
     // Both, because a socket can fail either way and KHost has to see the gap and fall back.
@@ -215,8 +260,36 @@
     volume: (ask) => { const to = level(ask.to); if (to !== null) setLevel(to); },
   });
 
-  Spicetify.Player.addEventListener('onplaypause', report);
-  Spicetify.Player.addEventListener('songchange', report);
+  // Attaches the half of this that needs a working player. Runs once, whenever the player turns
+  // up — which may be before the socket, after it, or never.
+  function startDriving(volume) {
+    ready = true;
+    previous = ours = volume;
 
+    Spicetify.Player.addEventListener('onplaypause', report);
+    Spicetify.Player.addEventListener('songchange', report);
+
+    sendDiagnosis();
+    report();
+  }
+
+  // First, and outside the wait below. The socket is the only way anything in here can be
+  // explained, so it is never behind the thing that might be broken — this extension used to open
+  // it only once the player answered, so a player that never answered left the host watching a
+  // port nothing ever connected to, with no way to tell that from an unpatched Spotify.
   connect();
+
+  (function waitForPlayer() {
+    const volume = readVolume();
+
+    if (volume !== null) return startDriving(volume);
+
+    waitedMs += PLAYER_POLL_MS;
+
+    // Said once, at the point the wait becomes a verdict. Before that it is a slow start, and
+    // after it nothing changes by saying so again every quarter second.
+    if (waitedMs === PLAYER_WAIT_MS) sendDiagnosis();
+
+    setTimeout(waitForPlayer, PLAYER_POLL_MS);
+  })();
 })();

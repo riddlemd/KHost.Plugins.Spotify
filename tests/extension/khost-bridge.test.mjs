@@ -4,7 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { loadExtension, connectExtension, lastFaded } from './harness.mjs';
+import { loadExtension, connectExtension, lastFaded, diagnoses } from './harness.mjs';
 
 // ── each command reaches its handler ────────────────────────────────────────────────
 
@@ -338,17 +338,82 @@ test('a level below 0 clamps to 0', async (t) => {
 // ── waiting for a player that is defined before it is ready ─────────────────────────
 
 test('a player whose getVolume throws is waited for, not treated as ready', async (t) => {
-  // The real client does exactly this. Taking defined for ready meant the very first read threw,
-  // the extension died before it ever opened a socket, and the host saw a bridge nothing attached
-  // to — with nothing anywhere saying why.
+  // The real client does exactly this: getVolume is a function on the player well before the
+  // player can serve it. Taking defined for ready meant the very first read threw and killed the
+  // extension outright.
   const ext = loadExtension({ volume: 0.4, throwsUntil: 3 });
   t.after(() => ext.dispose());
 
-  assert.equal(ext.sockets.length, 0);
+  ext.socket.open();
+  assert.equal(ext.player.setCalls.length, 0, 'nothing is driven before the player answers');
 
   await ext.clock.drain();
 
-  assert.equal(ext.sockets.length, 1);
+  assert.equal(diagnoses(ext).at(-1).ready, true);
+});
+
+test('the socket opens before the player does, so a player that never answers can still be explained', async (t) => {
+  // The whole of the detection rests on this order. While the socket was opened only once the
+  // player answered, a Spotify whose Spicetify never bound to it left the host watching a port
+  // nothing ever connected to — indistinguishable from an unpatched Spotify, and the wrong half
+  // of the search to send anybody to.
+  const ext = loadExtension({ volume: 0.4, throwsUntil: Infinity });
+  t.after(() => ext.dispose());
+
+  assert.equal(ext.sockets.length, 1, 'connected without waiting for a player at all');
+
+  ext.socket.open();
+
+  assert.deepEqual(
+    { type: diagnoses(ext)[0].type, ready: diagnoses(ext)[0].ready },
+    { type: 'diagnosis', ready: false },
+    'and said so the moment it was open');
+});
+
+test('a player that never comes up is reported once, with what it threw', async (t) => {
+  const ext = loadExtension({ volume: 0.4, throwsUntil: Infinity, platformKeys: 0 });
+  t.after(() => ext.dispose());
+
+  ext.socket.open();
+  await ext.clock.drain();
+
+  const verdict = diagnoses(ext).at(-1);
+
+  assert.equal(verdict.ready, false);
+  assert.equal(verdict.waitedMs, 30000, 'said at the point the wait becomes a verdict');
+  assert.equal(verdict.spicetify, true, 'Spicetify is there — it is its API that never started');
+  assert.equal(verdict.platformKeys, 0, 'which is what an empty Platform means');
+  assert.match(verdict.error, /player is not ready/);
+
+  // Once, not every quarter second: the host reads a warning, and the same one repeated 400 times
+  // is a log nobody finds anything in.
+  assert.equal(diagnoses(ext).filter((d) => d.waitedMs === 30000).length, 1);
+});
+
+test('a command arriving before the player is up is answered rather than attempted', async (t) => {
+  const ext = loadExtension({ volume: 0.4, throwsUntil: Infinity });
+  t.after(() => ext.dispose());
+
+  ext.socket.open();
+  ext.sentMessages.length = 0;
+
+  ext.socket.receive('{"type":"volume","to":0.8}');
+
+  assert.deepEqual(ext.player.setCalls, [], 'the player was not touched');
+  assert.equal(diagnoses(ext).at(-1).ready, false, 'the asker is told why instead');
+});
+
+test('a reconnection says how the extension is doing, not just that it is back', async (t) => {
+  // The host may outlive several Spotify restarts, and a bridge it never hears a verdict from is
+  // one it has to guess about.
+  const ext = connectExtension({ volume: 0.4 });
+  t.after(() => ext.dispose());
+
+  ext.socket.close();
+  await ext.clock.drain();
+  ext.socket.open();
+
+  assert.equal(diagnoses(ext).at(-1).ready, true);
 });
 
 test('the level a player finally reports is the one a fade in returns to', async (t) => {

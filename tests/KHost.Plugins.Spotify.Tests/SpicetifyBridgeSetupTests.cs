@@ -30,8 +30,11 @@ public class SpicetifyBridgeSetupTests : IDisposable
     /// <summary>Stops the loss watch, which the run leaves polling behind it.</summary>
     private readonly CancellationTokenSource _stopping = new();
 
-    /// <summary>What the extension's socket reports, read fresh on every check.</summary>
-    private bool _attached;
+    /// <summary>Whether an attached extension can actually drive Spotify, read fresh every check.</summary>
+    private bool _ready;
+
+    /// <summary>What an attached extension said about itself; null while none has said anything.</summary>
+    private SpicetifyDiagnosis? _diagnosis;
 
     private Func<Task<bool>> _isPlaying = () => Task.FromResult(false);
     private SpicetifyInstallOutcome _outcome = SpicetifyInstallOutcome.Installed;
@@ -92,7 +95,7 @@ public class SpicetifyBridgeSetupTests : IDisposable
     {
         PatchIsMissing();
 
-        await Build(onWait: () => _attached = true).RunAsync(_stopping.Token);
+        await Build(onWait: () => _ready = true).RunAsync(_stopping.Token);
 
         Assert.Equal([Install, Apply, Wait], _log);
     }
@@ -119,7 +122,7 @@ public class SpicetifyBridgeSetupTests : IDisposable
         PatchIsMissing();
         RegisterExtensionInConfig();
 
-        await Build(onWait: () => _attached = true).RunAsync(_stopping.Token);
+        await Build(onWait: () => _ready = true).RunAsync(_stopping.Token);
 
         Assert.Contains(Apply, _log);
     }
@@ -129,7 +132,7 @@ public class SpicetifyBridgeSetupTests : IDisposable
     {
         PatchIsPresent();
 
-        await Build(onWait: () => _attached = true).RunAsync(_stopping.Token);
+        await Build(onWait: () => _ready = true).RunAsync(_stopping.Token);
 
         Assert.Equal([Install, Wait], _log);
         _context.DidNotReceive().ReportWarning(Arg.Any<string>());
@@ -199,6 +202,59 @@ public class SpicetifyBridgeSetupTests : IDisposable
         _context.Received(1).ReportWarning(Arg.Is<string>(m => m.Contains("KHost patched Spotify")));
     }
 
+    /// <summary>
+    /// Attached and unable to work is its own answer, and patching is not it. The extension has
+    /// already said why over the socket, so the host repeats that rather than guessing from the
+    /// outside — and repeats it identically on every operating system, since the extension is the
+    /// same client-side code everywhere.
+    /// </summary>
+    [Fact]
+    public async Task RunAsync_TheExtensionAttachesAndCannotRun_ExplainsThatRatherThanPatching()
+    {
+        PatchIsPresent();
+        _diagnosis = new SpicetifyDiagnosis(
+            Ready: false, WaitedMilliseconds: 30000, HasSpicetify: true, HasPlayer: false,
+            PlatformKeys: 0, Error: "Cannot read properties of undefined (reading '_volume')");
+
+        await Build().RunAsync(_stopping.Token);
+
+        Assert.Equal([Install, Wait], _log);
+        _context.Received(1).ReportWarning(Arg.Is<string>(m =>
+            m.Contains("Spicetify's own API never started")
+            && m.Contains("Update Spicetify")
+            && m.Contains("reinstall Spotify first")));
+    }
+
+    /// <summary>
+    /// A fault the extension does not recognise must not be answered with a confident wrong
+    /// remedy: it still says update Spicetify, but without claiming to know that is the cause.
+    /// </summary>
+    [Fact]
+    public async Task RunAsync_TheExtensionCannotRunForSomeOtherReason_DoesNotBlameTheVersion()
+    {
+        PatchIsPresent();
+        _diagnosis = new SpicetifyDiagnosis(
+            Ready: false, WaitedMilliseconds: 30000, HasSpicetify: true, HasPlayer: true,
+            PlatformKeys: 40, Error: null);
+
+        await Build().RunAsync(_stopping.Token);
+
+        _context.Received(1).ReportWarning(Arg.Is<string>(m =>
+            m.Contains("never became usable") && !m.Contains("older than the installed Spotify")));
+    }
+
+    /// <summary>A ready extension is the working case and says nothing at all.</summary>
+    [Fact]
+    public async Task RunAsync_TheExtensionAttachesAndIsReady_SaysNothing()
+    {
+        PatchIsPresent();
+        _diagnosis = new SpicetifyDiagnosis(true, 0, true, true, 40, null);
+
+        await Build(onWait: () => _ready = true).RunAsync(_stopping.Token);
+
+        _context.DidNotReceive().ReportWarning(Arg.Any<string>());
+    }
+
     private SpicetifyBridgeSetup Build(Action? onWait = null)
     {
         var installation = new SpicetifyInstallation { ConfigDirectory = _root.FullName };
@@ -206,7 +262,8 @@ public class SpicetifyBridgeSetupTests : IDisposable
         return new SpicetifyBridgeSetup(
             NullLogger.Instance,
             _context,
-            () => _attached,
+            () => _ready,
+            () => _diagnosis,
             () => _isPlaying(),
             () => installation,
             (_, force) =>

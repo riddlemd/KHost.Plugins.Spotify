@@ -38,7 +38,8 @@ internal sealed class SpicetifyBridgeSetup
 
     private readonly ILogger _logger;
     private readonly IPluginContext _context;
-    private readonly Func<bool> _isExtensionAttached;
+    private readonly Func<bool> _isExtensionReady;
+    private readonly Func<SpicetifyDiagnosis?> _diagnose;
     private readonly Func<Task<bool>> _isSpotifyPlaying;
     private readonly Func<SpicetifyInstallation?> _discover;
     private readonly Func<SpicetifyInstallation, bool, Task<SpicetifyInstallOutcome>> _install;
@@ -47,7 +48,8 @@ internal sealed class SpicetifyBridgeSetup
     internal SpicetifyBridgeSetup(
         ILogger logger,
         IPluginContext context,
-        Func<bool> isExtensionAttached,
+        Func<bool> isExtensionReady,
+        Func<SpicetifyDiagnosis?> diagnose,
         Func<Task<bool>> isSpotifyPlaying,
         Func<SpicetifyInstallation?> discover,
         Func<SpicetifyInstallation, bool, Task<SpicetifyInstallOutcome>> install,
@@ -55,7 +57,8 @@ internal sealed class SpicetifyBridgeSetup
     {
         _logger = logger;
         _context = context;
-        _isExtensionAttached = isExtensionAttached;
+        _isExtensionReady = isExtensionReady;
+        _diagnose = diagnose;
         _isSpotifyPlaying = isSpotifyPlaying;
         _discover = discover;
         _install = install;
@@ -73,7 +76,8 @@ internal sealed class SpicetifyBridgeSetup
         => new(
             logger,
             context,
-            () => bridge.IsConnected,
+            () => bridge.IsReady,
+            () => bridge.LastDiagnosis,
             isSpotifyPlaying,
             SpicetifyInstallation.Discover,
             (installation, force) => new SpicetifyExtensionInstaller(logger)
@@ -123,16 +127,26 @@ internal sealed class SpicetifyBridgeSetup
 
             await _delay(GracePeriod, cancellationToken);
 
-            if (_isExtensionAttached())
+            if (_isExtensionReady())
             {
-                // It attached, so anything that drops it from here is a live problem rather than a
-                // setup one, and is only ever reported.
+                // It attached and can drive Spotify, so anything that goes from here is a live
+                // problem rather than a setup one, and is only ever reported.
                 WatchForLoss(cancellationToken);
                 return;
             }
 
-            // Nothing attached, and the disk says which of two quite different things that is.
-            // Patching cannot fix a patch that is already there, and reading the silence as a
+            // Attached and unable to work is not a patching problem at all, and the extension has
+            // already said so over the socket. Reported as it described itself, because the host
+            // cannot see inside Spotify and every guess it makes from out here is one somebody
+            // then has to disprove.
+            if (_diagnose() is { Ready: false } diagnosis)
+            {
+                ReportTheExtensionCannotRun(diagnosis);
+                return;
+            }
+
+            // Nothing attached at all, and the disk says which of two quite different things that
+            // is. Patching cannot fix a patch that is already there, and reading the silence as a
             // missing one sends the next person to the wrong half of the search.
             if (applied || _discover()?.IsSpotifyPatched() == true)
             {
@@ -166,7 +180,7 @@ internal sealed class SpicetifyBridgeSetup
             // until it is back up.
             await _delay(GracePeriod, cancellationToken);
 
-            if (!_isExtensionAttached())
+            if (!_isExtensionReady())
             {
                 ReportTheExtensionCannotRun(applied: true);
                 return;
@@ -208,7 +222,7 @@ internal sealed class SpicetifyBridgeSetup
                 return;
             }
 
-            if (_isExtensionAttached())
+            if (_isExtensionReady())
             {
                 reported = false;
                 continue;
@@ -247,6 +261,31 @@ internal sealed class SpicetifyBridgeSetup
         + "Spotify — it patches without error, and then its own API never starts, so no extension "
         + "runs. Update Spicetify and run 'spicetify backup apply'. Break music still plays, at "
         + "full level throughout.");
+
+    /// <summary>
+    /// The extension is attached and has said it cannot drive Spotify. Its own words are used,
+    /// since it is the only thing that can see, and the fix named is the host's to carry out.
+    /// </summary>
+    /// <remarks>
+    /// Nothing here is platform-specific and nothing here may become so: the fault, the wording
+    /// and the remedy all come from inside Spotify's own client, which is the same client on every
+    /// operating system this plugin runs on.
+    /// </remarks>
+    private void ReportTheExtensionCannotRun(SpicetifyDiagnosis diagnosis)
+    {
+        _logger.LogWarning("The Spicetify bridge cannot drive Spotify: {Diagnosis}", diagnosis.Describe());
+
+        _context.ReportWarning(
+            $"Break music will not fade: {diagnosis.Describe()}. "
+            + (diagnosis.SpicetifyApiNeverStarted
+                ? "That is a Spicetify older than the installed Spotify — it patches without "
+                  + "error and then never binds, so no extension can run. Update Spicetify, then "
+                  + "run 'spicetify backup apply'. If it says a backup already exists, reinstall "
+                  + "Spotify first so there is a clean copy to patch."
+                : "Updating Spicetify and running 'spicetify backup apply' is what usually fixes "
+                  + "it.")
+            + " Break music still plays, at full level throughout.");
+    }
 
     /// <summary>
     /// Whether the room can hear Spotify right now, which is the one thing that makes restarting

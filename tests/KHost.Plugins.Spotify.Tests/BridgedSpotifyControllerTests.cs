@@ -470,10 +470,88 @@ public class BridgedSpotifyControllerTests : IDisposable
         return port;
     }
 
+    // ── attached and unable to work, which has to read as no extension at all ─────────
+
+    /// <summary>
+    /// The extension opens its socket before it knows whether it can work, so attached is not the
+    /// same question as usable. A Spicetify that patched Spotify and never bound to it leaves one
+    /// exactly here: connected, and able to do nothing.
+    /// </summary>
+    [Fact]
+    public async Task WithABrokenExtension_PausingStillReachesTheBackend()
+    {
+        await using var extension = await AttachBrokenAsync();
+
+        await _controller.PauseAsync();
+
+        Assert.Contains("pause", _inner.Calls);
+    }
+
+    /// <summary>
+    /// The half of the track-change bug that would come back. The bridge outranks the backend's
+    /// own watch only while it can actually see — an extension that loaded and cannot run would
+    /// otherwise silence a backend that was managing perfectly well on its own.
+    /// </summary>
+    [Fact]
+    public async Task WithABrokenExtension_TheBackendsOwnWatch_StillReachesTheSubscriber()
+    {
+        await using var extension = await AttachBrokenAsync();
+
+        var raised = 0;
+        _controller.PlaybackChanged += (_, _) => raised++;
+
+        _inner.RaisePlaybackChanged();
+
+        Assert.Equal(1, raised);
+    }
+
+    /// <summary>
+    /// The backend's limitation is hidden only when the extension makes up for it. One that cannot
+    /// run makes up for nothing, and the host has to keep being told what they actually lose.
+    /// </summary>
+    [Fact]
+    public async Task WithABrokenExtension_TheBackendsLimitationIsStillReported()
+    {
+        _inner.Limitation = "This backend cannot fade.";
+
+        await using var extension = await AttachBrokenAsync();
+
+        Assert.Equal("This backend cannot fade.", _controller.Limitation);
+    }
+
+    [Fact]
+    public async Task WithABrokenExtension_TheStateComesFromTheBackend()
+    {
+        await using var extension = await AttachBrokenAsync();
+
+        await _controller.GetStateAsync();
+
+        Assert.Contains("state", _inner.Calls);
+    }
+
     private async Task<FakeExtension> AttachAsync()
     {
         var extension = await FakeExtension.ConnectAsync(_port);
-        await WaitForAsync(() => _bridge.IsConnected);
+
+        // Ready, not merely connected. The bridge reads the extension's opening report on its own
+        // loop, so a test that attaches and commands immediately races it — in the direction that
+        // passes on a fast machine and falls back to the backend on a slow one.
+        await WaitForAsync(() => _bridge.IsReady);
+
+        return extension;
+    }
+
+    /// <summary>
+    /// An extension that loaded into a Spotify whose Spicetify never bound to it: the socket is
+    /// there and nothing behind it works. It has to read as no extension at all, or the decorator
+    /// subtracts from a backend that was managing on its own.
+    /// </summary>
+    private async Task<FakeExtension> AttachBrokenAsync()
+    {
+        var extension = await FakeExtension.ConnectAsync(_port, ready: false);
+
+        await WaitForAsync(() => _bridge.LastDiagnosis is { Ready: false });
+
         return extension;
     }
 
