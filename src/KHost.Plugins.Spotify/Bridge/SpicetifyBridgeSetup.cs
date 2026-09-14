@@ -32,6 +32,14 @@ internal sealed class SpicetifyBridgeSetup
     internal static readonly TimeSpan GracePeriod = TimeSpan.FromSeconds(25);
 
     /// <summary>
+    /// The grace has to outlast the extension's own wait, or it asks for a verdict the extension
+    /// has not reached and falls through to blaming the patch — which is the wrong answer and the
+    /// one that restarts Spotify to prove it.
+    /// </summary>
+    internal static bool GracePeriodOutlastsTheExtensionsWait
+        => GracePeriod.TotalMilliseconds > SpicetifyDiagnosis.VerdictAfterMilliseconds;
+
+    /// <summary>
     /// Long enough that a Spotify restarting on its own is not mistaken for one that has gone.
     /// </summary>
     internal static readonly TimeSpan LossPollInterval = TimeSpan.FromSeconds(30);
@@ -139,7 +147,7 @@ internal sealed class SpicetifyBridgeSetup
             // already said so over the socket. Reported as it described itself, because the host
             // cannot see inside Spotify and every guess it makes from out here is one somebody
             // then has to disprove.
-            if (_diagnose() is { Ready: false } diagnosis)
+            if (_diagnose() is { Ready: false, IsVerdict: true } diagnosis)
             {
                 ReportTheExtensionCannotRun(diagnosis);
                 return;

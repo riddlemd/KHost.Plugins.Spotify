@@ -380,14 +380,14 @@ test('a player that never comes up is reported once, with what it threw', async 
   const verdict = diagnoses(ext).at(-1);
 
   assert.equal(verdict.ready, false);
-  assert.equal(verdict.waitedMs, 30000, 'said at the point the wait becomes a verdict');
+  assert.equal(verdict.waitedMs, 15000, 'said at the point the wait becomes a verdict');
   assert.equal(verdict.spicetify, true, 'Spicetify is there — it is its API that never started');
   assert.equal(verdict.platformKeys, 0, 'which is what an empty Platform means');
   assert.match(verdict.error, /player is not ready/);
 
   // Once, not every quarter second: the host reads a warning, and the same one repeated 400 times
   // is a log nobody finds anything in.
-  assert.equal(diagnoses(ext).filter((d) => d.waitedMs === 30000).length, 1);
+  assert.equal(diagnoses(ext).filter((d) => d.waitedMs === 15000).length, 1);
 });
 
 test('a command arriving before the player is up is answered rather than attempted', async (t) => {

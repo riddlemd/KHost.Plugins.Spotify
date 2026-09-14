@@ -20,12 +20,28 @@ public sealed record SpicetifyDiagnosis(
     string? Error)
 {
     /// <summary>
+    /// How long the extension waits for the player before its report is an answer rather than a
+    /// snapshot. It opens its socket immediately, so the first report it sends is nearly always
+    /// "not ready" — at that moment nothing has failed, and reading it as a fault accuses a
+    /// Spicetify that is merely still starting.
+    /// </summary>
+    /// <remarks>Shorter than <see cref="SpicetifyBridgeSetup.GracePeriod"/>, which is when the
+    /// host asks; <c>GracePeriodOutlastsTheExtensionsWait</c> holds the two together.</remarks>
+    public const int VerdictAfterMilliseconds = 15000;
+
+    /// <summary>
+    /// Whether this report settles anything. Working is always an answer; not working is only an
+    /// answer once the extension has waited the player out.
+    /// </summary>
+    public bool IsVerdict => Ready || WaitedMilliseconds >= VerdictAfterMilliseconds;
+
+    /// <summary>
     /// Spicetify patched Spotify and then never bound to it: extensions load, and
     /// <c>Spicetify.Platform</c> stays an empty object for as long as anything waits on it. The
     /// signature of a Spicetify older than the Spotify it patched, and the one fault here that no
     /// amount of re-patching fixes — measured at a hundred seconds on the machine it was found on.
     /// </summary>
-    public bool SpicetifyApiNeverStarted => !Ready && HasSpicetify && PlatformKeys <= 0;
+    public bool SpicetifyApiNeverStarted => IsVerdict && !Ready && HasSpicetify && PlatformKeys <= 0;
 
     /// <summary>
     /// One line naming what was seen, for the warning a host reads. Deliberately concrete: "the
@@ -37,6 +53,10 @@ public sealed record SpicetifyDiagnosis(
         if (Ready) return "the extension is attached and driving Spotify";
 
         var waited = $"after {WaitedMilliseconds / 1000}s";
+
+        // Not an accusation yet. The extension connects before it knows anything, so its first
+        // report always looks like a failure and is not one.
+        if (!IsVerdict) return $"the extension is attached and still waiting for the player {waited}";
 
         if (!HasSpicetify)
             return $"the extension loaded but Spicetify itself was not there {waited}";

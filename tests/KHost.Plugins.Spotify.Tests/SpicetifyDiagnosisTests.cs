@@ -39,7 +39,7 @@ public class SpicetifyDiagnosisTests
         var described = Diagnosis(ready: false, platformKeys: 0).Describe();
 
         Assert.Contains("Spicetify's own API never started", described);
-        Assert.Contains("after 30s", described);
+        Assert.Contains("after 15s", described);
         Assert.Contains(PlayerThrew, described);
     }
 
@@ -70,7 +70,7 @@ public class SpicetifyDiagnosisTests
     {
         var parsed = SpicetifyDiagnosis.Parse(FakeExtension.Diagnosis(ready: false));
 
-        Assert.Equal(new SpicetifyDiagnosis(false, 30000, true, false, 0, PlayerThrew), parsed);
+        Assert.Equal(new SpicetifyDiagnosis(false, 15000, true, false, 0, PlayerThrew), parsed);
     }
 
     /// <summary>The socket carries several kinds of message, and only one of them is this.</summary>
@@ -94,9 +94,36 @@ public class SpicetifyDiagnosisTests
         Assert.False(parsed?.Ready);
     }
 
+    /// <summary>
+    /// The extension opens its socket before it knows anything, so its first report says "not
+    /// ready" while nothing has gone wrong at all. Reading that as a fault accuses a Spicetify
+    /// that is merely still starting — which the live run did, one second before it worked.
+    /// </summary>
+    [Fact]
+    public void SpicetifyApiNeverStarted_TheExtensionHasOnlyJustConnected_IsFalse()
+        => Assert.False(
+            new SpicetifyDiagnosis(false, 0, true, false, 0, "not ready yet").SpicetifyApiNeverStarted);
+
+    [Fact]
+    public void Describe_TheExtensionHasOnlyJustConnected_SaysItIsWaitingRatherThanBroken()
+    {
+        var described = new SpicetifyDiagnosis(false, 0, true, false, 0, "x").Describe();
+
+        Assert.Contains("still waiting for the player", described);
+        Assert.DoesNotContain("never started", described);
+    }
+
+    /// <summary>
+    /// The host asks for a verdict when its grace runs out, so the extension has to have reached
+    /// one by then. Held together here because the two numbers live in different languages.
+    /// </summary>
+    [Fact]
+    public void TheHostsGraceOutlastsTheExtensionsWait()
+        => Assert.True(SpicetifyBridgeSetup.GracePeriodOutlastsTheExtensionsWait);
+
     private static SpicetifyDiagnosis Diagnosis(bool ready, int platformKeys) => new(
         ready,
-        WaitedMilliseconds: ready ? 0 : 30000,
+        WaitedMilliseconds: ready ? 0 : SpicetifyDiagnosis.VerdictAfterMilliseconds,
         HasSpicetify: true,
         HasPlayer: ready,
         platformKeys,

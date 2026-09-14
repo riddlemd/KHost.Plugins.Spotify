@@ -15,8 +15,10 @@
   const RECONNECT_MAX = 15000;
 
   // How long the player is given before its silence is called a fault rather than a slow start.
-  // Generous: this is competing with Spotify finishing its own boot, not with anything of ours.
-  const PLAYER_WAIT_MS = 30000;
+  // Generous enough for Spotify finishing its own boot, and deliberately shorter than the grace
+  // the host gives the bridge (SpicetifyBridgeSetup.GracePeriod) — the host asks for a verdict
+  // when that grace runs out, and a wait longer than it would have nothing to answer with.
+  const PLAYER_WAIT_MS = 15000;
   const PLAYER_POLL_MS = 250;
 
   let socket = null;

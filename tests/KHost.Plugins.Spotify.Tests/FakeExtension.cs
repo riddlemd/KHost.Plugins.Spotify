@@ -57,7 +57,7 @@ public sealed class FakeExtension : IAsyncDisposable
 
         return ready
             ? """{"type":"diagnosis","ready":true,"waitedMs":0,"spicetify":true,"player":true,"platformKeys":40,"error":null}"""
-            : $$"""{"type":"diagnosis","ready":false,"waitedMs":30000,"spicetify":true,"player":false,"platformKeys":0,"error":"{{PlayerThrew}}"}""";
+            : $$"""{"type":"diagnosis","ready":false,"waitedMs":15000,"spicetify":true,"player":false,"platformKeys":0,"error":"{{PlayerThrew}}"}""";
     }
 
     public Task SendAsync(string json) => _socket.SendAsync(
