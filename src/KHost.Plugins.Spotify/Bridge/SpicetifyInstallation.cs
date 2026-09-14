@@ -20,6 +20,79 @@ public sealed class SpicetifyInstallation
 
     public string ConfigFilePath => Path.Combine(ConfigDirectory, ConfigFileName);
 
+    /// <summary>
+    /// Whether the Spotify on this machine is actually carrying the extension — the only question
+    /// worth asking, and the one nothing else here answers.
+    /// </summary>
+    /// <remarks>
+    /// Not the exit code: <c>spicetify apply</c> over a Spotify it cannot patch warns and exits
+    /// zero, which is how an installer came to log that Spotify had been restarted to pick the
+    /// extension up while leaving it nowhere near Spotify. Not the config line either, nor the
+    /// file in Spicetify's own Extensions folder: both stay true after a Spotify update reverts
+    /// the patch, which is exactly the case this has to catch.
+    ///
+    /// Applying replaces <c>Apps/xpui.spa</c> with an extracted <c>Apps/xpui/</c> directory and
+    /// writes the extension inside it, so the file being there is the patch being live.
+    /// </remarks>
+    public bool IsSpotifyPatched()
+    {
+        if (SpotifyResourcesDirectory is not { } resources)
+            return false;
+
+        try
+        {
+            return File.Exists(Path.Combine(resources, "Apps", "xpui", "extensions", ExtensionFileName));
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Spotify's Resources folder, as Spicetify's own config records it. Read from there rather
+    /// than guessed, because a host may have Spotify somewhere this plugin would never look.
+    /// </summary>
+    public string? SpotifyResourcesDirectory => ReadConfigValue("spotify_path");
+
+    private string? ReadConfigValue(string key)
+    {
+        if (!File.Exists(ConfigFilePath))
+            return null;
+
+        try
+        {
+            foreach (var line in File.ReadAllLines(ConfigFilePath))
+            {
+                var trimmed = line.TrimStart();
+
+                if (!trimmed.StartsWith(key, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var separator = trimmed.IndexOf('=');
+
+                if (separator < 0)
+                    continue;
+
+                var value = trimmed[(separator + 1)..].Trim();
+
+                return value.Length > 0 ? value : null;
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+
+        return null;
+    }
+
     public static string CliFileName => OperatingSystem.IsWindows() ? "spicetify.exe" : "spicetify";
 
     /// <summary>The CLI, or null when Spicetify is not installed for this user.</summary>

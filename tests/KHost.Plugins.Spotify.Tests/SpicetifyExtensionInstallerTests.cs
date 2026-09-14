@@ -13,6 +13,19 @@ public class SpicetifyExtensionInstallerTests : IDisposable
 
     private SpicetifyInstallation Installation => new() { ConfigDirectory = _root.FullName };
 
+    /// <summary>Stands in for Spotify's Resources folder, which is what Spicetify patches.</summary>
+    private string SpotifyResources => Path.Combine(_root.FullName, "Spotify", "Contents", "Resources");
+
+    /// <summary>Where applying leaves the extension: the .spa is extracted to a directory first.</summary>
+    private string PatchedExtensionPath =>
+        Path.Combine(SpotifyResources, "Apps", "xpui", "extensions", "khost-bridge.js");
+
+    private void PretendSpotifyIsPatched()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(PatchedExtensionPath)!);
+        File.WriteAllText(PatchedExtensionPath, "bridge");
+    }
+
     public void Dispose()
     {
         try { _root.Delete(recursive: true); }
@@ -23,11 +36,36 @@ public class SpicetifyExtensionInstallerTests : IDisposable
     [Fact]
     public async Task EnsureInstalledAsync_NothingInstalled_CopiesRegistersAndApplies()
     {
-        var outcome = await Installer().EnsureInstalledAsync(Installation, WriteSource("bridge"), Cli);
+        WriteConfig("extensions = khost-bridge.js");
+
+        var outcome = await Installer().EnsureInstalledAsync(Installation, WriteSource("bridge"), Cli, force: true);
 
         Assert.Equal(SpicetifyInstallOutcome.Installed, outcome);
         Assert.Equal("bridge", File.ReadAllText(Installation.InstalledExtensionPath));
-        Assert.Equal(["config extensions khost-bridge.js", "apply"], _ran);
+
+        // apply first, and then the heavier call, because apply left the extension nowhere near
+        // Spotify while still exiting zero.
+        Assert.Equal(["config extensions khost-bridge.js", "apply", "backup apply"], _ran);
+    }
+
+    /// <summary>
+    /// The case that cost a night's fading. Everything on disk says the extension is installed and
+    /// registered, and neither fact is the same as the running Spotify being patched — an update
+    /// reverts the patch and leaves both true, so the currency check finds nothing to do. A caller
+    /// that watched for the extension and never saw it attach knows better, and says so.
+    /// </summary>
+    [Fact]
+    public async Task EnsureInstalledAsync_Forced_AppliesEvenWhenEverythingOnDiskLooksRight()
+    {
+        var source = WriteSource("bridge");
+
+        WriteInstalled("bridge");
+        WriteConfig("extensions = khost-bridge.js");
+
+        var outcome = await Installer().EnsureInstalledAsync(Installation, source, Cli, force: true);
+
+        Assert.Equal(SpicetifyInstallOutcome.Installed, outcome);
+        Assert.Equal(["config extensions khost-bridge.js", "apply", "backup apply"], _ran);
     }
 
     /// <summary>Applying patches Spotify and restarts it, so a settled host must not have it run.</summary>
@@ -62,7 +100,10 @@ public class SpicetifyExtensionInstallerTests : IDisposable
     [Fact]
     public async Task EnsureInstalledAsync_ApplyFailsWithNoBackup_FallsBackToBackupApply()
     {
-        var outcome = await Installer(fail: "apply").EnsureInstalledAsync(Installation, WriteSource("bridge"), Cli);
+        WriteConfig("extensions = khost-bridge.js");
+
+        var outcome = await Installer(fail: "apply")
+            .EnsureInstalledAsync(Installation, WriteSource("bridge"), Cli, force: true);
 
         Assert.Equal(SpicetifyInstallOutcome.Installed, outcome);
         Assert.Equal(["config extensions khost-bridge.js", "apply", "backup apply"], _ran);
@@ -96,6 +137,33 @@ public class SpicetifyExtensionInstallerTests : IDisposable
         Assert.Empty(_ran);
     }
 
+    /// <summary>
+    /// The bug behind a venue whose break music never faded. Spicetify exits zero when asked to
+    /// apply over a Spotify it has never backed up — it warns and does nothing — so an installer
+    /// reading the exit code called it a success, logged that Spotify had been restarted to pick
+    /// the extension up, and left the extension nowhere near Spotify. Nothing said otherwise, and
+    /// the missing fade was blamed on the bridge for a long time.
+    /// </summary>
+    [Fact]
+    public async Task EnsureInstalledAsync_SpicetifyExitsZeroWithoutPatching_IsNotCalledASuccess()
+    {
+        // Exits zero throughout, and leaves no backup behind: the real CLI's behaviour when it has
+        // nothing to patch over.
+        WriteConfig("extensions = khost-bridge.js");
+
+        var installer = new SpicetifyExtensionInstaller(NullLogger.Instance, (_, arguments, _) =>
+        {
+            _ran.Add(string.Join(' ', arguments));
+
+            return Task.FromResult(new ProcessResult(0, "spotify not backed up", string.Empty));
+        });
+
+        var outcome = await installer.EnsureInstalledAsync(
+            Installation, WriteSource("bridge"), Cli, force: true);
+
+        Assert.Equal(SpicetifyInstallOutcome.Failed, outcome);
+    }
+
     private SpicetifyExtensionInstaller Installer(string? fail = null, bool failBackup = false)
         => new(NullLogger.Instance, (_, arguments, _) =>
         {
@@ -106,11 +174,17 @@ public class SpicetifyExtensionInstallerTests : IDisposable
             var failed = fail is not null && line.StartsWith(fail, StringComparison.Ordinal)
                 || (failBackup && line.StartsWith("backup", StringComparison.Ordinal));
 
+            // What the real CLI leaves on disk, which is the only proof the installer accepts now:
+            // spicetify exiting zero is not the same as Spotify having been patched.
+            if (!failed && line.StartsWith("backup", StringComparison.Ordinal))
+                PretendSpotifyIsPatched();
+
             return Task.FromResult(new ProcessResult(failed ? 1 : 0, string.Empty, failed ? "no backup found" : string.Empty));
         });
 
     private void WriteConfig(string line)
-        => File.WriteAllLines(Installation.ConfigFilePath, ["[AdditionalOptions]", line]);
+        => File.WriteAllLines(Installation.ConfigFilePath,
+            ["[AdditionalOptions]", line, "[Setting]", $"spotify_path = {SpotifyResources}"]);
 
     private string WriteSource(string content)
     {

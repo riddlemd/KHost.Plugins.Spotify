@@ -43,6 +43,18 @@ public sealed class BridgedSpotifyController : ISpotifyController
 
             PlaybackChanged?.Invoke(this, EventArgs.Empty);
         };
+
+        // The backend's own watch, passed through. Without this it reached nothing: this class
+        // declares its own PlaybackChanged and only ever raised it from the bridge above, so on a
+        // machine whose Spotify is not patched — an update silently undoes it — the console was
+        // never told a track had turned over, whatever the backend underneath noticed.
+        _inner.PlaybackChanged += (_, _) =>
+        {
+            // The bridge outranks it when attached: that one is told, this one polls, and two
+            // announcements for one change cost the host two re-reads and two redraws.
+            if (!_bridge.IsConnected)
+                PlaybackChanged?.Invoke(this, EventArgs.Empty);
+        };
     }
 
     /// <summary>

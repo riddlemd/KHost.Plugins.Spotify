@@ -25,10 +25,17 @@ public sealed class SpicetifyExtensionInstaller(
     {
     }
 
+    /// <param name="force">
+    /// Applies even when everything on disk looks right. The currency check asks whether the file
+    /// is there and registered, which is not the same question as whether the running Spotify is
+    /// actually patched — an update reverts the patch and leaves both of those true. A caller that
+    /// has watched for the extension and seen it never attach knows better than the check does.
+    /// </param>
     public async Task<SpicetifyInstallOutcome> EnsureInstalledAsync(
-        SpicetifyInstallation installation, string sourcePath, string cliPath, CancellationToken cancellationToken = default)
+        SpicetifyInstallation installation, string sourcePath, string cliPath,
+        bool force = false, CancellationToken cancellationToken = default)
     {
-        if (installation.IsExtensionCurrent(sourcePath))
+        if (!force && installation.IsExtensionCurrent(sourcePath))
             return SpicetifyInstallOutcome.AlreadyCurrent;
 
         try
@@ -44,13 +51,26 @@ public sealed class SpicetifyExtensionInstaller(
 
             var applied = await run(cliPath, ["apply"], cancellationToken);
 
-            // A Spotify Spicetify has never patched has no backup to apply over, and says so
-            // rather than making one — that first run is the only time this second call is right.
-            if (!applied.Succeeded)
+            // Checked on the disk rather than taken from the exit code, which `apply` returns as
+            // zero even when it patched nothing at all. `backup apply` is the heavier call that
+            // takes its own copy of Spotify first, and is what actually works on a Spotify this
+            // Spicetify has not patched before — or has not patched since it last updated.
+            if (!applied.Succeeded || !installation.IsSpotifyPatched())
                 applied = await run(cliPath, ["backup", "apply"], cancellationToken);
 
             if (!applied.Succeeded)
                 return Failed("applying the change to Spotify", applied.Message);
+
+            // Claimed only where the extension is actually inside Spotify. Spicetify exiting zero
+            // is not the same as Spotify having been patched, and saying so anyway is what sent
+            // the last diagnosis looking in the wrong place for an afternoon.
+            if (!installation.IsSpotifyPatched())
+            {
+                return Failed("applying the change to Spotify",
+                    "Spicetify reported success but the extension is not in Spotify, so nothing was "
+                    + "patched. Run 'spicetify backup apply' yourself and check what it says — a "
+                    + "Spicetify older than the installed Spotify is the usual reason.");
+            }
 
             logger.LogInformation("Installed the KHost bridge extension into Spicetify; Spotify was restarted to pick it up");
 

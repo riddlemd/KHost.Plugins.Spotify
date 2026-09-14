@@ -43,6 +43,32 @@ public class BridgedSpotifyControllerTests : IDisposable
         Assert.Equal(["start", "pause", "resume", "skip", "stop"], _inner.Calls.Where(c => c != "state"));
     }
 
+    /// <summary>
+    /// The half of the track-change bug that lived here. This class declares its own
+    /// PlaybackChanged and used to raise it only from the bridge, so on a machine whose Spotify is
+    /// not patched — which is what a Spotify update quietly leaves behind — the backend's own
+    /// watch reached nothing and the console was never told a track had turned over.
+    /// </summary>
+    [Fact]
+    public void WithNoExtension_TheBackendsOwnWatch_ReachesTheSubscriber()
+    {
+        var raised = 0;
+        _controller.PlaybackChanged += (_, _) => raised++;
+
+        _inner.RaisePlaybackChanged();
+
+        Assert.Equal(1, raised);
+    }
+
+    /// <summary>Whatever the backend watches, starting it has to reach the backend.</summary>
+    [Fact]
+    public async Task StartingTheWatch_ReachesTheBackend()
+    {
+        await _controller.StartWatchingAsync();
+
+        Assert.True(_inner.WatchStarted);
+    }
+
     [Fact]
     public async Task WithNoExtension_SettingTheVolumeReportsItCouldNot()
     {

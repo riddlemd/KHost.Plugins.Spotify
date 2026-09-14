@@ -17,6 +17,19 @@ public sealed class FakeSpotifyController : ISpotifyController
     /// <summary>Stands in for Spotify moving without being asked.</summary>
     public void RaisePlaybackChanged() => PlaybackChanged?.Invoke(this, EventArgs.Empty);
 
+    /// <summary>
+    /// Kept off <see cref="Calls"/> on purpose: that list is what tests assert commands against,
+    /// and a watch is not a command a host issued.
+    /// </summary>
+    public bool WatchStarted { get; private set; }
+
+    public Task StartWatchingAsync(CancellationToken cancellationToken = default)
+    {
+        WatchStarted = true;
+
+        return Task.CompletedTask;
+    }
+
     public bool CanStart { get; set; } = true;
 
     public string? StartedContextUri { get; private set; }
