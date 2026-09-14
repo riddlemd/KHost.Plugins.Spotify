@@ -59,13 +59,15 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
 
             if (SpicetifyInstallation.FindCli() is { } cli)
             {
-                // Off the constructor: this patches Spotify and restarts it on the first run, which
-                // is far too slow to hold up the host starting. It settles long before a break.
-                _ = Task.Run(() => InstallExtensionAsync(cli));
+                // Off the constructor: this patches Spotify and restarts it on the first run,
+                // which is far too slow to hold up the host starting. It settles long before a
+                // break, and asks whether Spotify is playing before it touches anything.
+                var spotify = platform;
 
-                // And then watches whether any of it took. Applying is only ever done here, on the
-                // way up: it restarts Spotify, which mid-shift is the room's music stopping.
-                _ = Task.Run(() => SettleBridgeAsync(cli, context));
+                _ = Task.Run(() => SpicetifyBridgeSetup.ForThisMachine(
+                    logger, context, _bridge,
+                    async () => (await spotify.GetStateAsync())?.Playback == SpotifyPlayback.Playing,
+                    cli, ShippedExtensionPath).RunAsync());
             }
             else
             {
@@ -220,148 +222,6 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
     /// </summary>
     public Task SetVolumeAsync(float volume, CancellationToken cancellationToken = default)
         => Task.CompletedTask;
-
-    /// <summary>
-    /// How long the extension is given to connect before its absence is taken as an answer.
-    /// Generous: the install above may be restarting Spotify, and Spotify takes its time.
-    /// </summary>
-    private static readonly TimeSpan BridgeGracePeriod = TimeSpan.FromSeconds(25);
-
-    /// <summary>
-    /// Whether the bridge actually took, and what to do about it — which is different on the way
-    /// up from during a shift.
-    /// </summary>
-    /// <remarks>
-    /// The check that guards installing asks whether the file is on disk and registered in
-    /// Spicetify's config. Neither is the same question as whether the Spotify now running is
-    /// patched: an update reverts the patch and leaves both true, so the installer decided there
-    /// was nothing to do and the extension never attached again. Watching for the connection is
-    /// the only thing here that can tell the difference, because the extension connecting is the
-    /// one fact that requires the patch to be live.
-    ///
-    /// Startup applies, once. After that it only says so: applying restarts Spotify, and doing
-    /// that to a room mid-song to recover a fade is a worse outcome than the fade being missing.
-    /// </remarks>
-    private async Task SettleBridgeAsync(string cliPath, IPluginContext context)
-    {
-        if (_bridge is not { } bridge)
-            return;
-
-        try
-        {
-            await Task.Delay(BridgeGracePeriod);
-
-            if (bridge.IsConnected)
-            {
-                // It attached, so anything that drops it from here is a live problem rather than a
-                // setup one, and is only ever reported.
-                WatchForBridgeLoss(bridge, context);
-                return;
-            }
-
-            _logger.LogInformation(
-                "The Spicetify extension has not attached, so Spotify is not patched with it — applying again");
-
-            if (SpicetifyInstallation.Discover() is not { } installation)
-                return;
-
-            var outcome = await new SpicetifyExtensionInstaller(_logger)
-                .EnsureInstalledAsync(installation, ShippedExtensionPath, cliPath, force: true);
-
-            if (outcome == SpicetifyInstallOutcome.Failed)
-            {
-                context.ReportWarning(
-                    "Break music cannot fade: Spotify is not patched with the KHost bridge and KHost "
-                    + "could not patch it. Run 'spicetify apply' yourself and restart KHost. Break "
-                    + "music still plays; it starts and stops at full level.");
-
-                return;
-            }
-
-            // Given the same grace again: applying restarts Spotify, and the extension cannot
-            // connect until it is back up.
-            await Task.Delay(BridgeGracePeriod);
-
-            if (!bridge.IsConnected)
-            {
-                // Said as what it is. Calling this a loss would be wrong — nothing ever attached —
-                // and wrong in the direction that sends the next person looking at Spotify's
-                // update history rather than at whether Spicetify ever patched it.
-                context.ReportWarning(
-                    "Break music will not fade: KHost applied the Spicetify bridge to Spotify and "
-                    + "the extension still did not connect. Check 'spicetify backup apply' from a "
-                    + "terminal — it reports the reason, which is usually a Spicetify too old for "
-                    + "this Spotify. Break music still plays, at full level throughout.");
-
-                return;
-            }
-
-            WatchForBridgeLoss(bridge, context);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Could not settle the Spicetify bridge");
-        }
-    }
-
-    /// <summary>
-    /// Says so when the extension goes and stays gone. Never re-applies: a Spotify update during a
-    /// shift is exactly when this fires, and restarting Spotify to fix a fade would take the room's
-    /// music with it.
-    /// </summary>
-    /// <remarks>
-    /// Waits before speaking, because a detach is also what a Spotify restart looks like from here
-    /// and one that comes back is not worth a word. Said once per loss rather than once per poll.
-    /// </remarks>
-    private void WatchForBridgeLoss(SpicetifyBridge bridge, IPluginContext context) => _ = Task.Run(async () =>
-    {
-        bool reported = false;
-
-        while (true)
-        {
-            await Task.Delay(TimeSpan.FromSeconds(30));
-
-            if (bridge.IsConnected)
-            {
-                reported = false;
-                continue;
-            }
-
-            if (reported)
-                continue;
-
-            reported = true;
-
-            _logger.LogWarning("The Spicetify extension has detached and not come back");
-
-            context.ReportWarning(
-                "Spotify is no longer patched with the KHost bridge — usually a Spotify update "
-                + "undoing it. Break music still plays, but it starts and stops at full level "
-                + "instead of fading. Restarting KHost puts it back.");
-        }
-    });
-
-    /// <summary>
-    /// Nothing here is fatal: the bridge only ever added fading on top of a platform backend that
-    /// works without it, so a Spicetify that cannot be written to costs a fade, not break music.
-    /// </summary>
-    private async Task InstallExtensionAsync(string cliPath)
-    {
-        try
-        {
-            if (SpicetifyInstallation.Discover() is not { } installation)
-            {
-                _logger.LogInformation("Spicetify is installed but has never been run, so there is nothing to install the bridge into");
-                return;
-            }
-
-            await new SpicetifyExtensionInstaller(_logger).EnsureInstalledAsync(installation, ShippedExtensionPath, cliPath);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Could not install the KHost bridge extension into Spicetify");
-        }
-    }
 
     /// <summary>The copy beside this assembly, not the host's base directory — a plugin runs out of
     /// its own folder under plugins/.</summary>
