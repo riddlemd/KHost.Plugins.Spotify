@@ -529,6 +529,23 @@ public class BridgedSpotifyControllerTests : IDisposable
         Assert.Contains("state", _inner.Calls);
     }
 
+    /// <summary>
+    /// A Spotify restart, from the bridge's side: a second extension takes the place of the first.
+    /// The verdict belonged to the connection that gave it, and carrying it over would have the
+    /// host believe a fresh extension can fade before it has said whether it can — which on the
+    /// machine this was found on it could not.
+    /// </summary>
+    [Fact]
+    public async Task AReplacedExtension_DoesNotInheritTheLastOnesVerdict()
+    {
+        await using var first = await AttachAsync();
+        Assert.True(_bridge.IsReady);
+
+        await using var second = await FakeExtension.ConnectSilentAsync(_port);
+
+        await WaitForAsync(() => !_bridge.IsReady);
+    }
+
     private async Task<FakeExtension> AttachAsync()
     {
         var extension = await FakeExtension.ConnectAsync(_port);

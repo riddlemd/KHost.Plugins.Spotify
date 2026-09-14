@@ -36,6 +36,20 @@ public sealed class FakeExtension : IAsyncDisposable
         return extension;
     }
 
+    /// <summary>
+    /// Attaches without saying anything about itself, which every extension does for the moment
+    /// between its socket opening and its first report arriving.
+    /// </summary>
+    public static async Task<FakeExtension> ConnectSilentAsync(int port)
+    {
+        var socket = new ClientWebSocket();
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await socket.ConnectAsync(new Uri($"ws://127.0.0.1:{port}/khost"), timeout.Token);
+
+        return new FakeExtension(socket);
+    }
+
     /// <summary>The report the real extension opens with, as the bridge expects to read it.</summary>
     public static string Diagnosis(bool ready)
     {
