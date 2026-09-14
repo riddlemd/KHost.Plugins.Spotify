@@ -79,7 +79,7 @@ public class SpicetifyBridgeSetupTests : IDisposable
         await Build(onWait: () => playing = true).RunAsync(_stopping.Token);
 
         Assert.Equal([Install, Wait], _log);
-        _context.Received(1).ReportWarning(Arg.Is<string>(m => m.Contains("never attached")));
+        _context.Received(1).ReportWarning(Arg.Is<string>(m => m.Contains("Spotify carries the KHost bridge")));
     }
 
     /// <summary>
@@ -106,7 +106,7 @@ public class SpicetifyBridgeSetupTests : IDisposable
         await Build().RunAsync(_stopping.Token);
 
         Assert.Equal([Install, Apply, Wait], _log);
-        _context.Received(1).ReportWarning(Arg.Is<string>(m => m.Contains("never attached")));
+        _context.Received(1).ReportWarning(Arg.Is<string>(m => m.Contains("KHost patched Spotify")));
     }
 
     /// <summary>
@@ -150,7 +150,7 @@ public class SpicetifyBridgeSetupTests : IDisposable
         await Build().RunAsync(_stopping.Token);
 
         Assert.Equal([Install, Wait], _log);
-        _context.Received(1).ReportWarning(Arg.Is<string>(m => m.Contains("Spicetify too old")));
+        _context.Received(1).ReportWarning(Arg.Is<string>(m => m.Contains("Spotify carries the KHost bridge")));
     }
 
     [Fact]
@@ -178,6 +178,25 @@ public class SpicetifyBridgeSetupTests : IDisposable
         await Build().RunAsync(_stopping.Token);
 
         Assert.DoesNotContain(Apply, _log);
+    }
+
+    /// <summary>
+    /// Playing when the console came up, so nothing was patched then, and stopped by the time the
+    /// grace ran out — which makes patching affordable after all. The one path that reaches the
+    /// second apply: every other way to arrive here has already patched or already returned.
+    /// </summary>
+    [Fact]
+    public async Task RunAsync_PlayingAtStartThenStopsByTheGrace_PatchesAfterAll()
+    {
+        PatchIsMissing();
+
+        var playing = true;
+        _isPlaying = () => Task.FromResult(playing);
+
+        await Build(onWait: () => playing = false).RunAsync(_stopping.Token);
+
+        Assert.Equal([Wait, Apply, Wait], _log);
+        _context.Received(1).ReportWarning(Arg.Is<string>(m => m.Contains("KHost patched Spotify")));
     }
 
     private SpicetifyBridgeSetup Build(Action? onWait = null)
