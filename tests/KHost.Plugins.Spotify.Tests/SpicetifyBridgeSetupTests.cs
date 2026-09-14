@@ -46,8 +46,12 @@ public class SpicetifyBridgeSetupTests : IDisposable
         catch (UnauthorizedAccessException) { }
     }
 
+    /// <summary>
+    /// Unpatched and playing, so patching is both needed and unaffordable. The room keeps its
+    /// music and the host is told why the fade is missing.
+    /// </summary>
     [Fact]
-    public async Task RunAsync_SpotifyIsPlaying_TouchesNothingOnDisk()
+    public async Task RunAsync_SpotifyIsPlayingAndNotPatched_TouchesNothingOnDisk()
     {
         PatchIsMissing();
         _isPlaying = () => Task.FromResult(true);
@@ -55,6 +59,7 @@ public class SpicetifyBridgeSetupTests : IDisposable
         await Build().RunAsync(_stopping.Token);
 
         Assert.Equal([Wait], _log);
+        _context.Received(1).ReportWarning(Arg.Is<string>(m => m.Contains("would stop what is playing")));
     }
 
     /// <summary>
@@ -74,7 +79,7 @@ public class SpicetifyBridgeSetupTests : IDisposable
         await Build(onWait: () => playing = true).RunAsync(_stopping.Token);
 
         Assert.Equal([Install, Wait], _log);
-        _context.Received(1).ReportWarning(Arg.Is<string>(m => m.Contains("would stop what is playing")));
+        _context.Received(1).ReportWarning(Arg.Is<string>(m => m.Contains("never attached")));
     }
 
     /// <summary>
@@ -101,7 +106,7 @@ public class SpicetifyBridgeSetupTests : IDisposable
         await Build().RunAsync(_stopping.Token);
 
         Assert.Equal([Install, Apply, Wait], _log);
-        _context.Received(1).ReportWarning(Arg.Is<string>(m => m.Contains("still did not connect")));
+        _context.Received(1).ReportWarning(Arg.Is<string>(m => m.Contains("never attached")));
     }
 
     /// <summary>
@@ -131,17 +136,21 @@ public class SpicetifyBridgeSetupTests : IDisposable
     }
 
     /// <summary>
-    /// The patch is there but nothing attached and nothing is playing, so the config is believed
-    /// over the disk and it applies — then says so when that does not help either.
+    /// The extension is inside Spotify and still nothing attached. Applying again would write the
+    /// same file to the same place and restart Spotify for nothing, so it says what is actually
+    /// left: the extension cannot run. Found on a machine whose Spicetify was older than its
+    /// Spotify — Spicetify.Platform stayed an empty object for a hundred seconds, so every
+    /// extension sat in the wait its first line does, and the old message blamed the patch.
     /// </summary>
     [Fact]
-    public async Task RunAsync_PatchedYetNothingAttaches_AppliesAfterTheGrace()
+    public async Task RunAsync_PatchedYetNothingAttaches_SaysTheExtensionCannotRunRatherThanApplying()
     {
         PatchIsPresent();
 
         await Build().RunAsync(_stopping.Token);
 
-        Assert.Equal([Install, Wait, Apply, Wait], _log);
+        Assert.Equal([Install, Wait], _log);
+        _context.Received(1).ReportWarning(Arg.Is<string>(m => m.Contains("Spicetify too old")));
     }
 
     [Fact]

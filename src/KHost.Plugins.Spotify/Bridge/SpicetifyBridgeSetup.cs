@@ -131,6 +131,15 @@ internal sealed class SpicetifyBridgeSetup
                 return;
             }
 
+            // Nothing attached, and the disk says which of two quite different things that is.
+            // Patching cannot fix a patch that is already there, and reading the silence as a
+            // missing one sends the next person to the wrong half of the search.
+            if (applied || _discover()?.IsSpotifyPatched() == true)
+            {
+                ReportTheExtensionCannotRun(applied);
+                return;
+            }
+
             // The same rule the watch keeps for the rest of the shift: from here it only ever says
             // so. Restarting Spotify to recover a fade is a worse outcome than a missing fade.
             if (await IsPlayingAsync())
@@ -144,36 +153,22 @@ internal sealed class SpicetifyBridgeSetup
                 return;
             }
 
-            // Only where the patch looked present and turned out not to be. Having already applied
-            // above and still seen nothing attach, applying again would restart Spotify a second
-            // time to learn what it has just been told.
-            if (!applied)
-            {
-                _logger.LogInformation(
-                    "The Spicetify extension has not attached, so Spotify is not patched with it — applying again");
+            _logger.LogInformation(
+                "The Spicetify extension has not attached, so Spotify is not patched with it — applying again");
 
-                if (_discover() is not { } discovered)
-                    return;
+            if (_discover() is not { } discovered)
+                return;
 
-                if (await ApplyAsync(discovered) is SpicetifyInstallOutcome.Failed)
-                    return;
+            if (await ApplyAsync(discovered) is SpicetifyInstallOutcome.Failed)
+                return;
 
-                // Given the grace again: applying restarts Spotify, and the extension cannot
-                // connect until it is back up.
-                await _delay(GracePeriod, cancellationToken);
-            }
+            // Given the grace again: applying restarts Spotify, and the extension cannot connect
+            // until it is back up.
+            await _delay(GracePeriod, cancellationToken);
 
             if (!_isExtensionAttached())
             {
-                // Said as what it is. Calling this a loss would be wrong — nothing ever attached —
-                // and wrong in the direction that sends the next person looking at Spotify's
-                // update history rather than at whether Spicetify ever patched it.
-                _context.ReportWarning(
-                    "Break music will not fade: KHost applied the Spicetify bridge to Spotify and "
-                    + "the extension still did not connect. Check 'spicetify backup apply' from a "
-                    + "terminal — it reports the reason, which is usually a Spicetify too old for "
-                    + "this Spotify. Break music still plays, at full level throughout.");
-
+                ReportTheExtensionCannotRun(applied: true);
                 return;
             }
 
@@ -232,6 +227,26 @@ internal sealed class SpicetifyBridgeSetup
                 + "instead of fading. Restarting KHost puts it back.");
         }
     });
+
+    /// <summary>
+    /// The extension is inside Spotify and still nothing attached, which patching cannot fix —
+    /// applying again writes the same file to the same place and restarts Spotify for nothing.
+    /// </summary>
+    /// <remarks>
+    /// What is left is the extension being unable to run. Spicetify's own API never comes up on a
+    /// Spotify newer than the Spicetify that patched it: <c>Spicetify.Platform</c> stays an empty
+    /// object — measured at a hundred seconds on the machine this was found on — so every
+    /// extension sits in the wait its first line does, having loaded perfectly well. From out here
+    /// that is indistinguishable from an unpatched Spotify, which is why the disk is asked.
+    /// </remarks>
+    private void ReportTheExtensionCannotRun(bool applied) => _context.ReportWarning(
+        (applied
+            ? "Break music will not fade: KHost patched Spotify with the KHost bridge and the "
+            : "Break music will not fade: Spotify carries the KHost bridge but the ")
+        + "extension never attached. That is usually a Spicetify too old for the installed "
+        + "Spotify — it patches without error, and then its own API never starts, so no extension "
+        + "runs. Update Spicetify and run 'spicetify backup apply'. Break music still plays, at "
+        + "full level throughout.");
 
     /// <summary>
     /// Whether the room can hear Spotify right now, which is the one thing that makes restarting
