@@ -243,6 +243,25 @@ public class SpicetifyBridgeSetupTests : IDisposable
             m.Contains("never became usable") && !m.Contains("older than the installed Spotify")));
     }
 
+    /// <summary>
+    /// A report the extension has not stood behind yet is not a fault to repeat. It connects
+    /// before it knows anything, so its opening report says not-ready while nothing has gone
+    /// wrong — live, that was logged one second before the same extension reported itself working.
+    /// </summary>
+    [Fact]
+    public async Task RunAsync_TheExtensionHasNotReachedAVerdict_DoesNotRepeatItAsOne()
+    {
+        PatchIsPresent();
+        _diagnosis = new SpicetifyDiagnosis(
+            Ready: false, WaitedMilliseconds: 0, HasSpicetify: true, HasPlayer: false,
+            PlatformKeys: 0, Error: "not ready yet");
+
+        await Build().RunAsync(_stopping.Token);
+
+        _context.DidNotReceive().ReportWarning(Arg.Is<string>(m => m.Contains("still waiting for the player")));
+        _context.DidNotReceive().ReportWarning(Arg.Is<string>(m => m.Contains("Spicetify's own API never started")));
+    }
+
     /// <summary>A ready extension is the working case and says nothing at all.</summary>
     [Fact]
     public async Task RunAsync_TheExtensionAttachesAndIsReady_SaysNothing()
