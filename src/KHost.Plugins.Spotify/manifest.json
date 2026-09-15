@@ -7,7 +7,7 @@
   "description": "Plays break music through the Spotify desktop app on this machine.",
   "icon": "music-note-beamed",
   "entryAssembly": "KHost.Plugins.Spotify.dll",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "settings": [
     { "key": "playlistUri", "type": "string", "label": "Playlist (Spotify link or URI — blank resumes whatever Spotify has loaded)" },
     { "key": "shuffle", "type": "bool", "label": "Shuffle the playlist", "default": true },
