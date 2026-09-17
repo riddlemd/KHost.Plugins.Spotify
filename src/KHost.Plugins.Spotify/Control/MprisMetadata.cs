@@ -2,11 +2,8 @@ using System.Text.RegularExpressions;
 
 namespace KHost.Plugins.Spotify.Control;
 
-/// <summary>
-/// Picks the two fields worth showing out of what gdbus prints for MPRIS Metadata. Parsed as text
-/// rather than with a GVariant library so the plugin keeps shelling out to gdbus and carries no
-/// D-Bus dependency into the host's plugin folder.
-/// </summary>
+/// <summary>Picks the two fields worth showing out of what gdbus prints for MPRIS Metadata.
+/// Parsed as text so the plugin carries no D-Bus dependency into the host's plugin folder.</summary>
 public static partial class MprisMetadata
 {
     public static string? Title(string? metadata)

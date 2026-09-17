@@ -4,12 +4,8 @@ using System.Text.Json;
 
 namespace KHost.Plugins.Spotify.Tests;
 
-/// <summary>
-/// The manifest is read by the host and by nothing in this assembly, so a setting the SDK cannot
-/// parse costs nothing at build time and everything at load time: the plugin does not register,
-/// break music silently falls back, and the only report is a row on the Plugins page. The type
-/// names are the SDK enum's — "int", not "number".
-/// </summary>
+/// <summary>The manifest is read by the host, not this assembly: a setting the SDK cannot parse
+/// fails silently at load time, not build time. Type names are the SDK enum's: "int", not "number".</summary>
 public class ManifestTests
 {
     private static readonly string ManifestPath = Path.Combine(AppContext.BaseDirectory, PluginManifestFileName);

@@ -2,15 +2,8 @@ using System.Text.Json;
 
 namespace KHost.Plugins.Spotify.Bridge;
 
-/// <summary>
-/// Why the attached extension can or cannot drive Spotify, as the extension itself sees it.
-/// </summary>
-/// <remarks>
-/// The extension is the only code on the inside of the client, and it opens the socket before it
-/// checks whether it can work — so this arrives even from an extension that can do nothing else.
-/// That is what makes the explanation identical on macOS, Windows and Linux: nothing here is
-/// inferred from the host's own platform, because the host cannot see any of it.
-/// </remarks>
+/// <summary>Why the extension can or cannot drive Spotify; sent even when it cannot do anything.</summary>
+/// <remarks>Identical on every OS: nothing here is inferred from the host's own platform.</remarks>
 public sealed record SpicetifyDiagnosis(
     bool Ready,
     int WaitedMilliseconds,
@@ -19,35 +12,20 @@ public sealed record SpicetifyDiagnosis(
     int PlatformKeys,
     string? Error)
 {
-    /// <summary>
-    /// How long the extension waits for the player before its report is an answer rather than a
-    /// snapshot. It opens its socket immediately, so the first report it sends is nearly always
-    /// "not ready" — at that moment nothing has failed, and reading it as a fault accuses a
-    /// Spicetify that is merely still starting.
-    /// </summary>
-    /// <remarks>Shorter than <see cref="SpicetifyBridgeSetup.GracePeriod"/>, which is when the
-    /// host asks; <c>GracePeriodOutlastsTheExtensionsWait</c> holds the two together.</remarks>
+    /// <summary>How long before "not ready" reads as a verdict.</summary> <remarks>Shorter than
+    /// <see cref="SpicetifyBridgeSetup.GracePeriod"/>, which a test holds in step.</remarks>
     public const int VerdictAfterMilliseconds = 15000;
 
-    /// <summary>
-    /// Whether this report settles anything. Working is always an answer; not working is only an
-    /// answer once the extension has waited the player out.
-    /// </summary>
+    /// <summary>Working is always an answer; not working is only one once the extension has
+    /// waited the player out.</summary>
     public bool IsVerdict => Ready || WaitedMilliseconds >= VerdictAfterMilliseconds;
 
-    /// <summary>
-    /// Spicetify patched Spotify and then never bound to it: extensions load, and
-    /// <c>Spicetify.Platform</c> stays an empty object for as long as anything waits on it. The
-    /// signature of a Spicetify older than the Spotify it patched, and the one fault here that no
-    /// amount of re-patching fixes — measured at a hundred seconds on the machine it was found on.
-    /// </summary>
+    /// <summary>Spicetify patched Spotify and never bound to it: <c>Spicetify.Platform</c> stays
+    /// empty. Signals a Spicetify older than Spotify; re-patching never fixes it.</summary>
     public bool SpicetifyApiNeverStarted => IsVerdict && !Ready && HasSpicetify && PlatformKeys <= 0;
 
-    /// <summary>
-    /// One line naming what was seen, for the warning a host reads. Deliberately concrete: "the
-    /// extension is attached and Spicetify's API never started" sends somebody to the right place,
-    /// where "break music will not fade" sends them to KHost's own settings.
-    /// </summary>
+    /// <summary>Deliberately concrete: naming what was seen sends a host to the right place, where
+    /// "break music will not fade" would send them to KHost's own settings instead.</summary>
     public string Describe()
     {
         if (Ready) return "the extension is attached and driving Spotify";
@@ -71,7 +49,7 @@ public sealed record SpicetifyDiagnosis(
             + (Error is null ? "" : $" (it threw \"{Error}\")");
     }
 
-    /// <summary>Null for anything that is not a diagnosis — the socket carries several kinds.</summary>
+    /// <summary>Null for anything that is not a diagnosis: the socket carries several kinds.</summary>
     public static SpicetifyDiagnosis? Parse(string json)
     {
         try

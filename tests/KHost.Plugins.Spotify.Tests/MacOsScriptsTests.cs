@@ -4,10 +4,8 @@ namespace KHost.Plugins.Spotify.Tests;
 
 public class MacOsScriptsTests
 {
-    /// <summary>
-    /// Naming an application inside a tell block launches it, so an unguarded pause would start
-    /// Spotify in order to pause it.
-    /// </summary>
+    /// <summary>Naming an application inside a tell block launches it, so an unguarded pause
+    /// would start Spotify in order to pause it.</summary>
     [Fact]
     public void EveryScript_ChecksSpotifyIsRunningBeforeTellingIt()
     {

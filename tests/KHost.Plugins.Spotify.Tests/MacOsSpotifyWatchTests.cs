@@ -4,13 +4,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace KHost.Plugins.Spotify.Tests;
 
-/// <summary>
-/// macOS offers this process nothing to subscribe to, so the only way it learns a track turned
-/// over is by asking on a clock. This event used to discard its subscribers outright — a track
-/// change reached nothing, and the console's panel and the screen's card both sat on whatever had
-/// been playing when the host last pressed something. It read as a host bug for as long as it
-/// existed.
-/// </summary>
+/// <summary>macOS offers this process nothing to subscribe to, so the only way it learns a track
+/// turned over is by asking on a clock.</summary>
 public class MacOsSpotifyWatchTests
 {
     private readonly ConcurrentQueue<string> _replies = new();
@@ -86,16 +81,8 @@ public class MacOsSpotifyWatchTests
         throw new TimeoutException($"Timed out waiting for {what}.");
     }
 
-    /// <summary>
-    /// The reported bug: break music moved to the next song and nothing was told.
-    /// </summary>
-    /// <remarks>
-    /// Counted exactly, not "at least once", and the new track is left playing afterwards. One
-    /// change is one announcement: a watch that forgets what it last saw announces the same track
-    /// on every poll for as long as it plays, and a watch whose comparison is the wrong way round
-    /// announces the polls where nothing happened. Both pass an "at least once" assertion, and
-    /// both were live until this counted.
-    /// </remarks>
+    /// <summary>Counted exactly, not "at least once": a watch that forgets what it last saw
+    /// announces every poll, and one comparing the wrong way round announces on no-change polls.</summary>
     [Fact]
     public async Task ATrackTurningOver_IsAnnouncedOnceAndNotAgainWhileItPlays()
     {
@@ -118,10 +105,8 @@ public class MacOsSpotifyWatchTests
         Assert.Equal(1, Volatile.Read(ref _raised));
     }
 
-    /// <summary>
-    /// The host reaching for Spotify's own window is the other half of what this watch is for, and
-    /// the track name does not move when they do.
-    /// </summary>
+    /// <summary>The host reaching for Spotify's own window is the other half of what this watch
+    /// is for, and the track name does not move when they do.</summary>
     [Fact]
     public async Task PausingInSpotifysOwnWindow_RaisesPlaybackChanged()
     {
@@ -137,10 +122,8 @@ public class MacOsSpotifyWatchTests
         await WaitAsync(() => Volatile.Read(ref _raised) >= 1, "a pause to be announced");
     }
 
-    /// <summary>
-    /// Nothing moved, so nothing is announced. Raising every poll would have the host re-read
-    /// Spotify and redraw two screens several times a minute for a track sitting still.
-    /// </summary>
+    /// <summary>Nothing moved, so nothing is announced. Raising every poll would have the host
+    /// re-read Spotify and redraw two screens several times a minute for a track sitting still.</summary>
     [Fact]
     public async Task NothingMoving_AnnouncesNothingHoweverOftenItAsks()
     {
@@ -155,10 +138,8 @@ public class MacOsSpotifyWatchTests
         Assert.Equal(0, Volatile.Read(ref _raised));
     }
 
-    /// <summary>
-    /// The provider has already read Spotify by the time this starts, so the first sample is a
-    /// baseline. Announcing it would republish what the host just read.
-    /// </summary>
+    /// <summary>The provider has already read Spotify by the time this starts, so the first
+    /// sample is a baseline: announcing it would republish what the host just read.</summary>
     [Fact]
     public async Task TheFirstReading_IsABaselineRatherThanNews()
     {

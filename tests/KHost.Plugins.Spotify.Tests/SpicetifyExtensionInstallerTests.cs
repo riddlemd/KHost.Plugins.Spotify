@@ -48,12 +48,8 @@ public class SpicetifyExtensionInstallerTests : IDisposable
         Assert.Equal(["config extensions khost-bridge.js", "apply", "backup apply"], _ran);
     }
 
-    /// <summary>
-    /// The case that cost a night's fading. Everything on disk says the extension is installed and
-    /// registered, and neither fact is the same as the running Spotify being patched — an update
-    /// reverts the patch and leaves both true, so the currency check finds nothing to do. A caller
-    /// that watched for the extension and never saw it attach knows better, and says so.
-    /// </summary>
+    /// <summary>Installed and registered is not the same as patched: an update reverts the patch
+    /// and leaves both true, so a caller that watched and never saw it attach forces it anyway.</summary>
     [Fact]
     public async Task EnsureInstalledAsync_Forced_AppliesEvenWhenEverythingOnDiskLooksRight()
     {
@@ -137,13 +133,8 @@ public class SpicetifyExtensionInstallerTests : IDisposable
         Assert.Empty(_ran);
     }
 
-    /// <summary>
-    /// The bug behind a venue whose break music never faded. Spicetify exits zero when asked to
-    /// apply over a Spotify it has never backed up — it warns and does nothing — so an installer
-    /// reading the exit code called it a success, logged that Spotify had been restarted to pick
-    /// the extension up, and left the extension nowhere near Spotify. Nothing said otherwise, and
-    /// the missing fade was blamed on the bridge for a long time.
-    /// </summary>
+    /// <summary>Spicetify exits zero when asked to apply over a Spotify it has never backed up:
+    /// it warns and does nothing, so exit code alone is not proof the extension reached Spotify.</summary>
     [Fact]
     public async Task EnsureInstalledAsync_SpicetifyExitsZeroWithoutPatching_IsNotCalledASuccess()
     {

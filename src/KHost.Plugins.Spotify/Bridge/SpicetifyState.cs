@@ -3,19 +3,14 @@ using KHost.Plugins.Spotify.Control;
 
 namespace KHost.Plugins.Spotify.Bridge;
 
-/// <summary>
-/// What the extension reports from inside the client. Read straight from the player rather than
-/// asked for, so unlike the platform backends this costs no process and arrives as it happens.
-/// </summary>
+/// <summary>What the extension reports from inside the client, read straight from the player
+/// rather than asked for, so it costs no process and arrives as it happens.</summary>
 public sealed record SpicetifyState(SpotifyPlayback Playback, string? Title, string? Artist, float Volume)
 {
     public SpotifyState ToSpotifyState() => new(Playback, Title, Artist);
 
-    /// <summary>
-    /// The message's own type, or null when it is not a JSON object with one. Read rather than
-    /// matched against the text: a report naming a track called "faded" contains everything a
-    /// substring check for an acknowledgement would look for.
-    /// </summary>
+    /// <summary>The message's own type, or null when it is not a JSON object with one. Read rather
+    /// than matched against text: a track called "faded" would fool an acknowledgement check.</summary>
     public static string? TypeOf(string json)
     {
         try
@@ -34,11 +29,8 @@ public sealed record SpicetifyState(SpotifyPlayback Playback, string? Title, str
         }
     }
 
-    /// <summary>
-    /// Null for anything that is not a state report — the extension also sends acknowledgements,
-    /// and a malformed line from a client that can be replaced by anyone with the port is not
-    /// worth throwing over.
-    /// </summary>
+    /// <summary>Null for anything that is not a state report: the extension also sends
+    /// acknowledgements, and a malformed line is not worth throwing over.</summary>
     public static SpicetifyState? Parse(string json)
     {
         try

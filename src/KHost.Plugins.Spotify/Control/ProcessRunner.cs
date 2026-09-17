@@ -13,10 +13,8 @@ public record ProcessResult(int ExitCode, string StandardOutput, string Standard
 /// <summary>Runs the small command-line tools the backends drive Spotify through.</summary>
 public static class ProcessRunner
 {
-    /// <summary>
-    /// Every transport command is a local IPC round trip that should take milliseconds. A backend
-    /// hanging here would hang the console between singers, so it is cut off instead.
-    /// </summary>
+    /// <summary>Every transport command is a local IPC round trip that should take milliseconds.
+    /// A backend hanging here would hang the console between singers, so it is cut off instead.</summary>
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
 
     public static async Task<ProcessResult> RunAsync(

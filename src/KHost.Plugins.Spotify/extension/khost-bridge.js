@@ -1,23 +1,13 @@
-// KHost bridge for Spotify, as a Spicetify extension.
-//
-// Spotify's transport surface offers no volume on Windows at all, and on macOS only one process
-// spawn per step — about 100ms each, which is why fading was dropped the first time. From inside
-// the client a ramp is a loop, so this is where the fade lives; KHost drives it over a loopback
-// socket and falls back to the platform backend whenever this is not attached.
-//
-// The plugin installs and registers this itself when it finds Spicetify, so a host installs
-// Spicetify and nothing else. Editing this copy does nothing: the plugin overwrites it whenever
-// the file beside the assembly differs from the one Spicetify holds.
+// KHost bridge for Spotify, as a Spicetify extension: runs inside the client, the only place a
+// smooth volume ramp exists. Editing this copy does nothing; the plugin overwrites it on mismatch.
 
 (function KHostBridge() {
   const PORT = Number(localStorage.getItem('khost.bridge.port')) || 8974;
   const RECONNECT_MIN = 1000;
   const RECONNECT_MAX = 15000;
 
-  // How long the player is given before its silence is called a fault rather than a slow start.
-  // Generous enough for Spotify finishing its own boot, and deliberately shorter than the grace
-  // the host gives the bridge (SpicetifyBridgeSetup.GracePeriod) — the host asks for a verdict
-  // when that grace runs out, and a wait longer than it would have nothing to answer with.
+  // How long before silence is called a fault, not a slow start. Deliberately shorter than the
+  // host's own grace (SpicetifyBridgeSetup.GracePeriod), so it has an answer when that runs out.
   const PLAYER_WAIT_MS = 15000;
   const PLAYER_POLL_MS = 250;
 
@@ -57,10 +47,8 @@
     }
   }
 
-  // Everything the host needs to explain a bridge that is attached and cannot work. Sent on every
-  // connection and again the moment the answer changes, so a host that started first still learns
-  // it — and sent from in here because this is the only code on the inside of the client, which is
-  // what makes the explanation the same on every operating system.
+  // Explains a bridge that is attached and cannot work. Sent on every connection and again the
+  // moment the answer changes, so a host that started first still learns it.
   function sendDiagnosis() {
     const S = window.Spicetify;
 
@@ -70,9 +58,8 @@
       waitedMs: waitedMs,
       spicetify: !!S,
       player: !!(S && S.Player),
-      // Spicetify's API arrives as a populated Platform. An empty one that stays empty is the
-      // signature of a Spicetify older than the Spotify it patched: it patches without error and
-      // then never binds, so every extension loads and none of them can do anything.
+      // An empty Platform that stays empty signals a Spicetify older than the Spotify it patched:
+      // it patches without error and never binds, so every extension loads and can do nothing.
       platformKeys: (S && S.Platform) ? Object.keys(S.Platform).length : -1,
       error: lastError || null,
     });
@@ -83,10 +70,8 @@
     Spicetify.Player.setVolume(to);
   }
 
-  // Adopts a level the host set themselves. Compared against what we wrote rather than against
-  // zero: a fade leaves levels of its own behind, and taking one of those makes the room come back
-  // to a point part way up a ramp, or to the silence a fade out ended on. Loose, because the level
-  // Spotify reports back is a rounding of the one it was given.
+  // Adopts a level the host set themselves. Compared against what we wrote, not zero: a fade
+  // leaves levels of its own behind, and Spotify's reported level is only a rounding of that.
   function noteHostLevel() {
     const now = Spicetify.Player.getVolume();
 
@@ -95,9 +80,8 @@
     if (Math.abs(now - ours) > 0.005) previous = ours = now;
   }
 
-  // Null when the level is not a number to begin with. Dropped rather than substituted, because
-  // Math.max(0, undefined) is NaN, and a NaN reaching the player also becomes the level every
-  // later fade in comes back to.
+  // Null when not a number. Dropped rather than substituted: Math.max(0, undefined) is NaN, and
+  // a NaN reaching the player becomes the level every later fade in comes back to.
   const level = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : null);
 
   function connect() {
@@ -124,9 +108,8 @@
       // extension is a version pair a host can end up with, and it should degrade quietly.
       if (!run) return;
 
-      // A command arriving before the player is up is answered rather than attempted. The host
-      // gates on the diagnosis and should not be sending one, but a race at startup is cheap to
-      // absorb and a thrown command would leave whoever asked waiting for an acknowledgement.
+      // Answered rather than attempted: the host should not send one before the diagnosis says
+      // ready, but a startup race is cheap to absorb versus leaving the caller with no acknowledgement.
       if (!ready) return sendDiagnosis();
 
       run(ask, Math.max(0, ask.ms | 0));
@@ -180,12 +163,8 @@
     return ramp(0, ms);
   }
 
-  // The two halves with no transport on the end of them: going quiet before the backend loads a
-  // playlist or ends a session, and coming back once it has. Neither carries a level — out is
-  // always to silence, and back is always to what silence was taken from.
-  //
-  // Silent when superseded: the plugin takes the first acknowledgement as the answer to what it
-  // last asked, so one for a level the room never settled at unblocks the wrong caller.
+  // Neither half carries a level: out is always to silence, back always to what silence left.
+  // Silent when superseded, so a stale acknowledgement cannot unblock the wrong caller.
   async function silence(ms) {
     if (await fadeOut(ms)) send({ type: 'faded', to: 0 });
   }
@@ -194,17 +173,14 @@
     if (await ramp(previous, ms)) send({ type: 'faded', to: previous });
   }
 
-  // The ramp itself, with no message on the end: each command that uses it has its own thing to
-  // say once it lands. False when a newer command took over part way, which the
-  // caller has to honour — its own work is as superseded as the writes were.
+  // The ramp itself, with no message on the end: each caller has its own thing to say once it
+  // lands. False when a newer command took over part way, which the caller must honour.
   async function ramp(to, ms) {
     cancelFade();
     const mine = fadeToken;
 
-    // What we last wrote, not what the player reports: a read taken straight after a write comes
-    // back with the level Spotify has yet to apply, so a fade in from silence saw the level it had
-    // just left and either skipped the ramp or ran it from the wrong end. The host moving the
-    // slider is picked up by noteHostLevel instead, which is the only thing that can tell.
+    // What we last wrote, not what the player reports: a read taken right after a write returns
+    // the level Spotify has yet to apply. The host moving the slider is caught by noteHostLevel instead.
     const from = ours;
 
     if (ms === 0 || Math.abs(to - from) < 0.005) {
@@ -226,9 +202,8 @@
 
   // Faded out and paused as one act.
   async function pauseWithFadeOut(ms) {
-    // Nothing after this point if a newer command took over: pausing would stop playback the
-    // newer command never asked to interrupt, at whatever level it had just set, while claiming
-    // the room had reached silence.
+    // Nothing after this point if a newer command took over: pausing would stop the playback it
+    // never asked to interrupt, while claiming the room had reached silence.
     if (!await fadeOut(ms)) return;
 
     if (Spicetify.Player.isPlaying()) Spicetify.Player.pause();
@@ -251,9 +226,8 @@
     send({ type: 'faded', to: previous, playing: true });
   }
 
-  // A table rather than a chain of comparisons: what each command takes sits beside its name, and
-  // adding one is a line. Null-prototyped so a message naming 'constructor' or 'toString' finds
-  // nothing — the port is loopback, but anything on the machine can reach it.
+  // A table, not a chain of comparisons: adding a command is a line. Null-prototyped so a message
+  // naming 'constructor' or 'toString' finds nothing, since anything on the machine can reach this.
   const COMMANDS = Object.assign(Object.create(null), {
     pauseWithFadeOut: (ask, ms) => pauseWithFadeOut(ms),
     playWithFadeIn: (ask, ms) => playWithFadeIn(ms),
@@ -263,7 +237,7 @@
   });
 
   // Attaches the half of this that needs a working player. Runs once, whenever the player turns
-  // up — which may be before the socket, after it, or never.
+  // up, which may be before the socket, after it, or never.
   function startDriving(volume) {
     ready = true;
     previous = ours = volume;
@@ -275,10 +249,8 @@
     report();
   }
 
-  // First, and outside the wait below. The socket is the only way anything in here can be
-  // explained, so it is never behind the thing that might be broken — this extension used to open
-  // it only once the player answered, so a player that never answered left the host watching a
-  // port nothing ever connected to, with no way to tell that from an unpatched Spotify.
+  // First, and outside the wait below: the socket is the only way anything in here can be
+  // explained, so it must never be behind the thing that might be broken.
   connect();
 
   (function waitForPlayer() {

@@ -4,14 +4,8 @@ using System.Runtime.Versioning;
 
 namespace KHost.Plugins.Spotify.Control;
 
-/// <summary>
-/// Drives Spotify over MPRIS, the desktop-media bus every Linux player answers on. Discrete Play,
-/// Pause, Stop and Next, so nothing here has to know what Spotify is currently doing.
-/// </summary>
-/// <remarks>
-/// gdbus is shelled out to rather than taking a D-Bus client dependency: a plugin's dependencies
-/// are copied into the host's plugin folder, and glib ships gdbus on any desktop that has Spotify.
-/// </remarks>
+/// <summary>Drives Spotify over MPRIS, the desktop-media bus every Linux player answers on.</summary>
+/// <remarks>gdbus is shelled out to: a D-Bus client library would be copied into the plugin folder.</remarks>
 [SupportedOSPlatform("linux")]
 public sealed class LinuxSpotifyController : ISpotifyController
 {
@@ -32,11 +26,8 @@ public sealed class LinuxSpotifyController : ISpotifyController
 
     public string? Limitation => null;
 
-    /// <summary>
-    /// Never raised. MPRIS emits PropertiesChanged on the session bus, which a long-lived
-    /// gdbus monitor would relay; until then the host asks rather than being told, and only
-    /// misses a change the host made in Spotify's own window.
-    /// </summary>
+    /// <summary>Never raised: MPRIS emits PropertiesChanged on the session bus, which a long-lived
+    /// gdbus monitor would relay; until then, the host asks rather than being told.</summary>
     public event EventHandler? PlaybackChanged { add { } remove { } }
 
     public async Task<bool> StartAsync(string? contextUri, bool shuffle, CancellationToken cancellationToken = default)
@@ -58,10 +49,8 @@ public sealed class LinuxSpotifyController : ISpotifyController
         return true;
     }
 
-    /// <summary>
-    /// MPRIS reports the transport as a property. Null when the bus call fails at all — Spotify
-    /// not being on the bus is itself the answer that it is not playing.
-    /// </summary>
+    /// <summary>MPRIS reports the transport as a property. Null when the bus call fails at all:
+    /// Spotify not being on the bus is itself the answer that it is not playing.</summary>
     public async Task<SpotifyState?> GetStateAsync(CancellationToken cancellationToken = default)
     {
         var status = await ReadPropertyAsync("PlaybackStatus", cancellationToken);
@@ -161,10 +150,8 @@ public sealed class LinuxSpotifyController : ISpotifyController
         }
     }
 
-    /// <summary>
-    /// Started and left running, not awaited: the Spotify binary does not exit, so waiting on it
-    /// would spend the whole command timeout every launch.
-    /// </summary>
+    /// <summary>Started and left running, not awaited: the Spotify binary does not exit, so
+    /// waiting on it would spend the whole command timeout every launch.</summary>
     private async Task<bool> LaunchAsync(CancellationToken cancellationToken)
     {
         try

@@ -2,27 +2,16 @@ using System.Text.RegularExpressions;
 
 namespace KHost.Plugins.Spotify;
 
-/// <summary>
-/// Turns what a host actually pastes — the "Copy link to playlist" URL — into the
-/// <c>spotify:playlist:id</c> form every backend wants.
-/// </summary>
+/// <summary>Turns the "Copy link to playlist" URL a host actually pastes into the
+/// <c>spotify:playlist:id</c> form every backend wants.</summary>
 public static partial class SpotifyUri
 {
-    /// <summary>
-    /// Contexts worth playing a break-music bed from. A single track is rejected: it ends after
-    /// one song and nothing here reads Spotify back to notice.
-    /// </summary>
+    /// <summary>A single track is rejected: it ends after one song and nothing here reads Spotify
+    /// back to notice.</summary>
     private static readonly string[] PlayableTypes = ["playlist", "album", "artist", "collection"];
 
-    /// <summary>
-    /// Null when the value is blank or is not a Spotify context this can play. Callers treat null
-    /// as "resume whatever Spotify already has loaded".
-    /// </summary>
-    /// <remarks>
-    /// The base62 shape is enforced rather than assumed: this string is interpolated into an
-    /// AppleScript literal and a D-Bus argument, so anything that is not [A-Za-z0-9] would be an
-    /// injection point.
-    /// </remarks>
+    /// <summary>Null when blank or not playable; callers read null as resume whatever is loaded.</summary>
+    /// <remarks>Base62 only: this feeds an AppleScript literal and a D-Bus argument as-is.</remarks>
     public static string? Normalize(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
