@@ -11,11 +11,8 @@ public enum SpicetifyInstallOutcome
     Failed,
 }
 
-/// <summary>
-/// Puts the bridge extension into a host's Spicetify so fading works without them being asked to
-/// copy a file. Only ever runs when something is actually out of date — applying patches Spotify
-/// and restarts it, which is not something to do on every console start.
-/// </summary>
+/// <summary>Puts the bridge extension into a host's Spicetify so fading works without them being
+/// asked to copy a file. Only runs when something is out of date: applying patches Spotify.</summary>
 public sealed class SpicetifyExtensionInstaller(
     ILogger logger,
     Func<string, IEnumerable<string>, CancellationToken, Task<ProcessResult>> run)
@@ -28,7 +25,7 @@ public sealed class SpicetifyExtensionInstaller(
     /// <param name="force">
     /// Applies even when everything on disk looks right. The currency check asks whether the file
     /// is there and registered, which is not the same question as whether the running Spotify is
-    /// actually patched — an update reverts the patch and leaves both of those true. A caller that
+    /// actually patched: an update reverts the patch and leaves both of those true. A caller that
     /// has watched for the extension and seen it never attach knows better than the check does.
     /// </param>
     public async Task<SpicetifyInstallOutcome> EnsureInstalledAsync(
@@ -51,19 +48,16 @@ public sealed class SpicetifyExtensionInstaller(
 
             var applied = await run(cliPath, ["apply"], cancellationToken);
 
-            // Checked on the disk rather than taken from the exit code, which `apply` returns as
-            // zero even when it patched nothing at all. `backup apply` is the heavier call that
-            // takes its own copy of Spotify first, and is what actually works on a Spotify this
-            // Spicetify has not patched before — or has not patched since it last updated.
+            // Checked on the disk, not the exit code: `apply` returns zero even when it patched
+            // nothing, and `backup apply` is the heavier call that actually works on this Spotify.
             if (!applied.Succeeded || !installation.IsSpotifyPatched())
                 applied = await run(cliPath, ["backup", "apply"], cancellationToken);
 
             if (!applied.Succeeded)
                 return Failed("applying the change to Spotify", applied.Message);
 
-            // Claimed only where the extension is actually inside Spotify. Spicetify exiting zero
-            // is not the same as Spotify having been patched, and saying so anyway is what sent
-            // the last diagnosis looking in the wrong place for an afternoon.
+            // Claimed only where the extension is actually inside Spotify: Spicetify exiting zero
+            // is not the same as Spotify having been patched, which cost an afternoon once.
             if (!installation.IsSpotifyPatched())
             {
                 return Failed("applying the change to Spotify",

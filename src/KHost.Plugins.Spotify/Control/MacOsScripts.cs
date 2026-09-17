@@ -1,15 +1,11 @@
 namespace KHost.Plugins.Spotify.Control;
 
-/// <summary>
-/// The AppleScript each command sends. Split out from the backend so the script a setting
-/// produces can be asserted without Spotify, or a Mac, being involved.
-/// </summary>
+/// <summary>The AppleScript each command sends. Split out from the backend so the script a
+/// setting produces can be asserted without Spotify, or a Mac, being involved.</summary>
 public static class MacOsScripts
 {
-    /// <summary>
-    /// Guarded rather than told directly: naming an application inside a <c>tell</c> launches it,
-    /// so an unguarded pause would start Spotify in order to pause it.
-    /// </summary>
+    /// <summary>Guarded rather than told directly: naming an application inside a <c>tell</c>
+    /// launches it, so an unguarded pause would start Spotify in order to pause it.</summary>
     private const string NotRunning = "notrunning";
 
     public static string Play(string? contextUri, bool shuffle)
@@ -26,10 +22,8 @@ public static class MacOsScripts
         return Guarded(body);
     }
 
-    /// <summary>
-    /// One line, tab separated, because AppleScript returns a list as a comma-joined string that
-    /// a track called "Hello, Goodbye" would then split in the wrong place.
-    /// </summary>
+    /// <summary>One line, tab separated, since AppleScript returns a list as a comma-joined string
+    /// that a track called "Hello, Goodbye" would split in the wrong place.</summary>
     public static string State() => Guarded(
         "return (player state as text) & tab & (name of current track) & tab & (artist of current track)");
 

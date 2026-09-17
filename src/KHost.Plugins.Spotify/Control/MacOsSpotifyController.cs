@@ -3,20 +3,16 @@ using System.Runtime.Versioning;
 
 namespace KHost.Plugins.Spotify.Control;
 
-/// <summary>
-/// Drives Spotify.app through its AppleScript dictionary, which has the discrete play, pause and
-/// next commands this plugin needs — no toggle to keep track of.
-/// </summary>
+/// <summary>Drives Spotify.app through its AppleScript dictionary, which has the discrete play,
+/// pause and next commands this plugin needs, no toggle to keep track of.</summary>
 [SupportedOSPlatform("macos")]
 public sealed class MacOsSpotifyController : ISpotifyController, IDisposable
 {
     /// <summary>osascript's code for an Apple event the user has not granted Automation access to.</summary>
     private const string NotAuthorized = "-1743";
 
-    /// <summary>
-    /// Spotify accepts Apple events some way into launching, and the first command after a cold
-    /// start is otherwise dropped. Only paid once, when Spotify was not already running.
-    /// </summary>
+    /// <summary>Spotify accepts Apple events some way into launching, and the first command after
+    /// a cold start is otherwise dropped. Only paid once, when Spotify was not already running.</summary>
     private static readonly TimeSpan LaunchSettle = TimeSpan.FromSeconds(3);
 
     private readonly ILogger _logger;
@@ -31,11 +27,8 @@ public sealed class MacOsSpotifyController : ISpotifyController, IDisposable
     {
     }
 
-    /// <summary>
-    /// The seams the watch below is tested through: without them a test either spawns osascript or
-    /// waits out a real interval, and a loop nobody can drive is one whose change detection is
-    /// asserted by hand.
-    /// </summary>
+    /// <summary>The seams the watch below is tested through: without them a test either spawns
+    /// osascript or waits out a real interval, asserting change detection by hand.</summary>
     internal MacOsSpotifyController(
         ILogger logger,
         bool launchIfNotRunning,
@@ -50,46 +43,26 @@ public sealed class MacOsSpotifyController : ISpotifyController, IDisposable
 
     public string? Limitation => null;
 
-    /// <summary>
-    /// How often Spotify is asked what it is doing. Each ask is an osascript process, so this is a
-    /// compromise rather than a target: a track turning over is noticed within a few seconds,
-    /// which is what a card on screen and a console panel need, without a spawn every second all
-    /// shift.
-    /// </summary>
+    /// <summary>Each ask is an osascript process, so this is a compromise, not a target: a track
+    /// turning over is noticed within a few seconds, without a spawn every second all shift.</summary>
     private static readonly TimeSpan WatchInterval = TimeSpan.FromSeconds(3);
 
-    /// <summary>
-    /// Nothing is loaded, so a change can only come from someone reaching for Spotify's own
-    /// window. Worth noticing, not worth the same cadence.
-    /// </summary>
+    /// <summary>Nothing is loaded, so a change can only come from someone reaching for Spotify's
+    /// own window. Worth noticing, not worth the same cadence.</summary>
     private static readonly TimeSpan IdleWatchInterval = TimeSpan.FromSeconds(10);
 
     private readonly CancellationTokenSource _watchStopping = new();
     private Task? _watch;
 
-    /// <summary>
-    /// What the last poll saw. Compared rather than remembered as a flag: raising on every poll
-    /// would have the host re-read Spotify three times a second for a track that has not moved.
-    /// </summary>
+    /// <summary>What the last poll saw. Compared rather than remembered as a flag: raising on
+    /// every poll would have the host re-read Spotify three times a second for nothing new.</summary>
     private string? _lastSeen;
 
     /// <inheritdoc />
     public event EventHandler? PlaybackChanged;
 
-    /// <summary>
-    /// Polls, because macOS offers this process nothing to subscribe to. Spotify posts
-    /// com.spotify.client.PlaybackStateChanged as a distributed notification, which would be the
-    /// right thing to listen to — reaching NSDistributedNotificationCenter from here needs
-    /// Objective-C interop this plugin does not otherwise have, and until it does, asking on a
-    /// clock is the difference between a console that notices a track change and one that does
-    /// not notice at all.
-    /// </summary>
-    /// <remarks>
-    /// This is what was missing. The event above used to discard its subscribers, so a track
-    /// turning over reached nothing: the console's panel and the screen's card both sat on the
-    /// song that had been playing when the host last pressed something. It looked like a host bug
-    /// and was a backend that could only ever be asked.
-    /// </remarks>
+    /// <summary>Polls, since macOS offers this process nothing to subscribe to: reaching Spotify's
+    /// own distributed notification needs Objective-C interop this plugin does not have.</summary>
     public Task StartWatchingAsync(CancellationToken cancellationToken = default)
     {
         _watch ??= Task.Run(() => WatchAsync(_watchStopping.Token), CancellationToken.None);
@@ -140,11 +113,8 @@ public sealed class MacOsSpotifyController : ISpotifyController, IDisposable
         }
     }
 
-    /// <summary>
-    /// What is playing, as one string to compare. The track alone is not enough — pausing leaves
-    /// it unchanged, and a host pressing pause in Spotify's own window is exactly the case this
-    /// watch exists for.
-    /// </summary>
+    /// <summary>What is playing, as one string to compare. The track alone is not enough: pausing
+    /// leaves it unchanged, exactly the case this watch exists for.</summary>
     private async Task<string?> SignatureAsync(CancellationToken cancellationToken)
     {
         if (await GetStateAsync(cancellationToken) is not { } state)
@@ -180,10 +150,8 @@ public sealed class MacOsSpotifyController : ISpotifyController, IDisposable
         return await RunAsync(script, cancellationToken);
     }
 
-    /// <summary>
-    /// Stopped, not null, when Spotify is not running: the guard declining to start it is a
-    /// definite answer, unlike osascript failing to run at all.
-    /// </summary>
+    /// <summary>Stopped, not null, when Spotify is not running: the guard declining to start it is
+    /// a definite answer, unlike osascript failing to run at all.</summary>
     public async Task<SpotifyState?> GetStateAsync(CancellationToken cancellationToken = default)
     {
         try
@@ -208,7 +176,7 @@ public sealed class MacOsSpotifyController : ISpotifyController, IDisposable
     public Task ResumeAsync(CancellationToken cancellationToken = default)
         => RunAsync(MacOsScripts.Play(contextUri: null, shuffle: false), cancellationToken);
 
-    /// <summary>Pause is as far as the dictionary goes — it exposes no stop command.</summary>
+    /// <summary>Pause is as far as the dictionary goes: it exposes no stop command.</summary>
     public Task StopAsync(CancellationToken cancellationToken = default)
         => RunAsync(MacOsScripts.Pause(), cancellationToken);
 

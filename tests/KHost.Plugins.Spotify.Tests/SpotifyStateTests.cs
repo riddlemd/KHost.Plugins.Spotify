@@ -14,7 +14,7 @@ public class ShouldSendToggleTests
         Assert.False(WindowsSpotifyController.ShouldSendToggle(state, SpotifyPlayback.Playing));
     }
 
-    // Pausing what is already stopped would start it — the toggle only goes one way.
+    // Pausing what is already stopped would start it: the toggle only goes one way.
     [Fact]
     public void ShouldSendToggle_StoppedAndAskedToPause_SendsNothing()
     {

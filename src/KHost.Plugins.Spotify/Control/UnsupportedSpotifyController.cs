@@ -1,10 +1,7 @@
 namespace KHost.Plugins.Spotify.Control;
 
-/// <summary>
-/// Stands in on an OS with no backend. Every command is accepted and does nothing, and
-/// <see cref="StartAsync"/> is false so the console shows the bed as stopped rather than as
-/// playing something nobody can hear.
-/// </summary>
+/// <summary>Stands in on an OS with no backend. Every command is accepted and does nothing, and
+/// <see cref="StartAsync"/> is false so the console shows the bed as stopped, not as playing.</summary>
 public sealed class UnsupportedSpotifyController : ISpotifyController
 {
     public UnsupportedSpotifyController(string platform) => Limitation =

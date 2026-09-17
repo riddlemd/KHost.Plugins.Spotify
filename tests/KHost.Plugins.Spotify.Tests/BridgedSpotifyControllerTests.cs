@@ -7,12 +7,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace KHost.Plugins.Spotify.Tests;
 
-/// <summary>
-/// The decorator's whole point is that it adds and never subtracts: a host with no extension
-/// installed — which is nearly all of them — has to get exactly the behaviour they had before.
-/// Driven against a real socket rather than a substituted bridge, because the thing worth proving
-/// is that a browser's frames and ours meet in the middle.
-/// </summary>
+/// <summary>A host with no extension installed must get exactly the behaviour they had before.
+/// Driven against a real socket, not a substitute, since browser frames meeting ours is the point.</summary>
 public class BridgedSpotifyControllerTests : IDisposable
 {
     private readonly FakeSpotifyController _inner = new();
@@ -43,12 +39,8 @@ public class BridgedSpotifyControllerTests : IDisposable
         Assert.Equal(["start", "pause", "resume", "skip", "stop"], _inner.Calls.Where(c => c != "state"));
     }
 
-    /// <summary>
-    /// The half of the track-change bug that lived here. This class declares its own
-    /// PlaybackChanged and used to raise it only from the bridge, so on a machine whose Spotify is
-    /// not patched — which is what a Spotify update quietly leaves behind — the backend's own
-    /// watch reached nothing and the console was never told a track had turned over.
-    /// </summary>
+    /// <summary>This class declares its own PlaybackChanged, so the backend's watch must be
+    /// passed through: an unpatched Spotify must still reach the subscriber.</summary>
     [Fact]
     public void WithNoExtension_TheBackendsOwnWatch_ReachesTheSubscriber()
     {
@@ -107,7 +99,7 @@ public class BridgedSpotifyControllerTests : IDisposable
         var command = await extension.NextAsync();
 
         // One command carries both, so there is no window between the ramp ending and the pause
-        // arriving — and the backend is not asked to pause a client the extension already did.
+        // arriving, and the backend is not asked to pause a client the extension already did.
         Assert.Contains("\"type\":\"pauseWithFadeOut\"", command);
 
         // No level travels with it either way: out is always to silence, and the level to come
@@ -167,7 +159,7 @@ public class BridgedSpotifyControllerTests : IDisposable
         // Spotify restarting mid-show is the case: the socket goes and the pause still has to land.
         Assert.Contains("pause", _inner.Calls);
 
-        // And it lands on the socket closing rather than on waiting the whole grace out — between
+        // And it lands on the socket closing rather than on waiting the whole grace out: between
         // singers, a two second stall is the thing the fade was supposed to avoid.
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(1.5), $"took {watch.ElapsedMilliseconds}ms");
     }
@@ -215,9 +207,8 @@ public class BridgedSpotifyControllerTests : IDisposable
         Assert.Contains("\"type\":\"restore\"", coming);
         await extension.SendAsync("""{"type":"faded","to":0.4}""");
 
-        // Neither carries a level. The way back is the room's own setting, which lives in Spotify
-        // and has never been told to this end — a level sent from here could only be a guess, and
-        // the guess was full volume.
+        // Neither carries a level: the room's setting lives in Spotify and has never been told
+        // to this end, so a level sent from here could only be a guess, at full volume.
         Assert.DoesNotContain("\"to\"", silencing);
         Assert.DoesNotContain("\"to\"", coming);
 
@@ -265,7 +256,7 @@ public class BridgedSpotifyControllerTests : IDisposable
         Assert.Contains("\"ms\":40", silencing);
         await extension.SendAsync("""{"type":"faded","to":0}""");
 
-        // Put back while it is silent, or Spotify is left muted for whoever reaches for it next —
+        // Put back while it is silent, or Spotify is left muted for whoever reaches for it next,
         // and put back to what it was, not to a level this end picked.
         var restoring = await extension.NextAsync();
         Assert.Contains("\"type\":\"restore\"", restoring);
@@ -290,7 +281,7 @@ public class BridgedSpotifyControllerTests : IDisposable
         Assert.Contains("\"type\":\"silence\"", await extension.NextAsync());
         await extension.SendAsync("""{"type":"faded","to":0}""");
 
-        // Nothing started, so the silence just set would be permanent — and Spotify would be mute
+        // Nothing started, so the silence just set would be permanent, and Spotify would be mute
         // the next time the host reached for it themselves.
         Assert.Contains("\"type\":\"restore\"", await extension.NextAsync());
         await extension.SendAsync("""{"type":"faded","to":0.4}""");
@@ -327,7 +318,7 @@ public class BridgedSpotifyControllerTests : IDisposable
         var skipping = _controller.SkipAsync();
 
         // The backend's next track resumes a paused client, and the level is still where the fade
-        // out left it — so without this the new song plays and the room hears nothing.
+        // out left it, so without this the new song plays and the room hears nothing.
         Assert.Contains("\"type\":\"playWithFadeIn\"", await extension.NextAsync());
 
         await extension.SendAsync("""{"type":"faded","to":0.62,"playing":true}""");
@@ -384,7 +375,7 @@ public class BridgedSpotifyControllerTests : IDisposable
     {
         await using var extension = await AttachAsync();
 
-        // Nothing here faded it out — this is KHost restarting over break music the host had
+        // Nothing here faded it out: this is KHost restarting over break music the host had
         // already taken down, so the extension's report is the only thing that knows.
         await extension.SendAsync("""{"type":"state","playing":false,"title":"Regulate","volume":0}""");
         await WaitForAsync(() => _bridge.LastState is not null);
@@ -447,9 +438,8 @@ public class BridgedSpotifyControllerTests : IDisposable
         var pausing = _controller.PauseAsync();
         await extension.NextAsync();
 
-        // Alan Walker is real, and so is a host who puts him on between singers. Matched on the
-        // message's own type rather than on the text anywhere in it, or the ramp ends the moment
-        // the extension reports what is playing.
+        // Alan Walker is real, and so is a host who puts him on between singers: matched on the
+        // message's own type, or a track titled "faded" would end the ramp the moment it played.
         await extension.SendAsync("""{"type":"state","playing":true,"title":"faded","volume":0.4}""");
         await Task.Delay(150);
 
@@ -472,11 +462,8 @@ public class BridgedSpotifyControllerTests : IDisposable
 
     // ── attached and unable to work, which has to read as no extension at all ─────────
 
-    /// <summary>
-    /// The extension opens its socket before it knows whether it can work, so attached is not the
-    /// same question as usable. A Spicetify that patched Spotify and never bound to it leaves one
-    /// exactly here: connected, and able to do nothing.
-    /// </summary>
+    /// <summary>The extension opens its socket before it knows whether it can work, so attached
+    /// is not the same question as usable: a Spicetify that never bound leaves one exactly here.</summary>
     [Fact]
     public async Task WithABrokenExtension_PausingStillReachesTheBackend()
     {
@@ -487,11 +474,8 @@ public class BridgedSpotifyControllerTests : IDisposable
         Assert.Contains("pause", _inner.Calls);
     }
 
-    /// <summary>
-    /// The half of the track-change bug that would come back. The bridge outranks the backend's
-    /// own watch only while it can actually see — an extension that loaded and cannot run would
-    /// otherwise silence a backend that was managing perfectly well on its own.
-    /// </summary>
+    /// <summary>The bridge outranks the backend's own watch only while it can actually see: an
+    /// extension that loaded and cannot run would otherwise silence a backend managing fine alone.</summary>
     [Fact]
     public async Task WithABrokenExtension_TheBackendsOwnWatch_StillReachesTheSubscriber()
     {
@@ -505,10 +489,8 @@ public class BridgedSpotifyControllerTests : IDisposable
         Assert.Equal(1, raised);
     }
 
-    /// <summary>
-    /// The backend's limitation is hidden only when the extension makes up for it. One that cannot
-    /// run makes up for nothing, and the host has to keep being told what they actually lose.
-    /// </summary>
+    /// <summary>The backend's limitation is hidden only when the extension makes up for it. One
+    /// that cannot run makes up for nothing, so the host keeps being told what they actually lose.</summary>
     [Fact]
     public async Task WithABrokenExtension_TheBackendsLimitationIsStillReported()
     {
@@ -529,12 +511,8 @@ public class BridgedSpotifyControllerTests : IDisposable
         Assert.Contains("state", _inner.Calls);
     }
 
-    /// <summary>
-    /// A Spotify restart, from the bridge's side: a second extension takes the place of the first.
-    /// The verdict belonged to the connection that gave it, and carrying it over would have the
-    /// host believe a fresh extension can fade before it has said whether it can — which on the
-    /// machine this was found on it could not.
-    /// </summary>
+    /// <summary>A second extension replaces the first, and the verdict belongs to the connection
+    /// that gave it: carrying it over would let a fresh extension fade before it has said it can.</summary>
     [Fact]
     public async Task AReplacedExtension_DoesNotInheritTheLastOnesVerdict()
     {
@@ -550,19 +528,15 @@ public class BridgedSpotifyControllerTests : IDisposable
     {
         var extension = await FakeExtension.ConnectAsync(_port);
 
-        // Ready, not merely connected. The bridge reads the extension's opening report on its own
-        // loop, so a test that attaches and commands immediately races it — in the direction that
-        // passes on a fast machine and falls back to the backend on a slow one.
+        // Ready, not merely connected: the bridge reads the opening report on its own loop, so
+        // commanding immediately races it, passing on a fast machine and falling back on a slow one.
         await WaitForAsync(() => _bridge.IsReady);
 
         return extension;
     }
 
-    /// <summary>
-    /// An extension that loaded into a Spotify whose Spicetify never bound to it: the socket is
-    /// there and nothing behind it works. It has to read as no extension at all, or the decorator
-    /// subtracts from a backend that was managing on its own.
-    /// </summary>
+    /// <summary>An extension that loaded into a Spotify whose Spicetify never bound to it: the
+    /// socket is there and nothing behind it works, so it must read as no extension at all.</summary>
     private async Task<FakeExtension> AttachBrokenAsync()
     {
         var extension = await FakeExtension.ConnectAsync(_port, ready: false);

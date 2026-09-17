@@ -4,22 +4,15 @@ using System.Text;
 
 namespace KHost.Plugins.Spotify.Bridge;
 
-/// <summary>
-/// Just enough of RFC 6455 to carry JSON lines between the plugin and the Spicetify extension.
-/// Hand-rolled rather than taken from HttpListener, whose WebSocket support is Windows-only and
-/// would leave the backend this exists for — macOS and Linux — without a bridge at all.
-/// </summary>
+/// <summary>Just enough of RFC 6455 to carry JSON lines between the plugin and the Spicetify
+/// extension. Hand-rolled since HttpListener's WebSocket support is Windows-only.</summary>
 internal static class WebSocketFrame
 {
     /// <summary>The constant RFC 6455 mixes into the client's key to prove the handshake was read.</summary>
     private const string HandshakeSalt = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
-    /// <summary>
-    /// Both ends of this file agree on one ceiling. Reading is where it matters — the port is
-    /// loopback but anything on the machine can reach it, and a declared length is an allocation
-    /// somebody else chose. It is the largest a three-byte header can express, and one more
-    /// overflows the length cast silently into a frame that declares nothing.
-    /// </summary>
+    /// <summary>Reading is where it matters: the port is loopback, but anything on the machine can
+    /// reach it; it is the largest a three-byte header can express before overflowing the cast.</summary>
     internal const int MaxPayload = ushort.MaxValue;
 
     internal const byte Text = 0x1;
@@ -27,17 +20,13 @@ internal static class WebSocketFrame
     internal const byte Ping = 0x9;
     internal const byte Pong = 0xA;
 
-    /// <summary>
-    /// The value the client's <c>Sec-WebSocket-Key</c> has to be answered with. A client that does
-    /// not see its own key come back refuses the connection, so this is not decorative.
-    /// </summary>
+    /// <summary>The value the client's <c>Sec-WebSocket-Key</c> has to be answered with; a client
+    /// that does not see its own key come back refuses the connection.</summary>
     public static string AcceptFor(string clientKey)
         => Convert.ToBase64String(SHA1.HashData(Encoding.ASCII.GetBytes(clientKey + HandshakeSalt)));
 
-    /// <summary>
-    /// Reads one header line at a time rather than taking the whole request: a browser sends the
-    /// handshake and then says nothing until it has something to say, so reading to the end blocks.
-    /// </summary>
+    /// <summary>Reads one header line at a time: a browser sends the handshake and then says
+    /// nothing until it has something to say, so reading to the end blocks.</summary>
     public static async Task<Dictionary<string, string>> ReadHeadersAsync(
         Stream stream, CancellationToken cancellationToken)
     {
@@ -72,7 +61,7 @@ internal static class WebSocketFrame
         var body = Encoding.UTF8.GetBytes(payload);
 
         // Commands are a line of JSON, so this is a bug on our side rather than something a peer
-        // can provoke — and a frame the other end would refuse to read is worse sent than thrown.
+        // can provoke; a frame the other end would refuse to read is worse sent than thrown.
         if (body.Length > MaxPayload)
             throw new ArgumentOutOfRangeException(nameof(payload), $"Frames are capped at {MaxPayload} bytes.");
 
@@ -94,7 +83,8 @@ internal static class WebSocketFrame
         return [.. header, .. body];
     }
 
-    /// <summary>Null when the peer closed. Control frames come back with their opcode for the caller to answer.</summary>
+    /// <summary>Null when the peer closed. Control frames come back with their opcode for the
+    /// caller to answer.</summary>
     public static async Task<(byte Opcode, string Payload)?> ReadAsync(
         Stream stream, CancellationToken cancellationToken)
     {

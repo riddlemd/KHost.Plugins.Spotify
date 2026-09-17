@@ -3,45 +3,18 @@ using Microsoft.Extensions.Logging;
 
 namespace KHost.Plugins.Spotify.Bridge;
 
-/// <summary>
-/// Gets the bridge extension into the Spotify on this machine, and says so when it will not go.
-/// </summary>
-/// <remarks>
-/// A type of its own rather than a corner of the break music provider, because the whole of it
-/// turns on one rule — <b>applying restarts Spotify, so it only ever happens while the room is not
-/// listening</b> — and a rule whose breach costs the room its music has to be assertable without a
-/// Spotify to break. Every collaborator is a delegate for that reason.
-///
-/// The check that guards installing asks whether the file is on disk and registered in Spicetify's
-/// config. Neither is the same question as whether Spotify is patched: an update reverts the patch
-/// and leaves both true, so the installer decides there is nothing to do and the extension never
-/// attaches again. <see cref="SpicetifyInstallation.IsSpotifyPatched"/> is the question that
-/// matters, and it reads Spotify's own resources rather than Spicetify's config — so it answers
-/// whether or not Spotify is running.
-///
-/// The extension connecting is then the confirmation, not the diagnosis. It cannot be the
-/// diagnosis: nothing attaches to a Spotify that is not running, and the console starting before
-/// Spotify is the normal way round.
-/// </remarks>
+/// <summary>Gets the bridge extension into Spotify, and reports when it will not go.</summary>
+/// <remarks>Applying restarts Spotify, so this only ever patches while the room isn't listening.</remarks>
 internal sealed class SpicetifyBridgeSetup
 {
-    /// <summary>
-    /// How long the extension is given to connect before its absence is taken as an answer.
-    /// Generous: applying restarts Spotify, and Spotify takes its time coming back.
-    /// </summary>
+    /// <summary>Grace before a missing extension counts as an answer; applying restarts Spotify.</summary>
     internal static readonly TimeSpan GracePeriod = TimeSpan.FromSeconds(25);
 
-    /// <summary>
-    /// The grace has to outlast the extension's own wait, or it asks for a verdict the extension
-    /// has not reached and falls through to blaming the patch — which is the wrong answer and the
-    /// one that restarts Spotify to prove it.
-    /// </summary>
+    /// <summary>Must outlast the extension's wait, or an unreached verdict is blamed on the patch.</summary>
     internal static bool GracePeriodOutlastsTheExtensionsWait
         => GracePeriod.TotalMilliseconds > SpicetifyDiagnosis.VerdictAfterMilliseconds;
 
-    /// <summary>
-    /// Long enough that a Spotify restarting on its own is not mistaken for one that has gone.
-    /// </summary>
+    /// <summary>Long enough that a self-restarting Spotify isn't mistaken for one that has gone.</summary>
     internal static readonly TimeSpan LossPollInterval = TimeSpan.FromSeconds(30);
 
     private readonly ILogger _logger;
@@ -92,29 +65,18 @@ internal sealed class SpicetifyBridgeSetup
                 .EnsureInstalledAsync(installation, shippedExtensionPath, cliPath, force),
             Task.Delay);
 
-    /// <summary>
-    /// Runs the whole of the way up: patch if it needs patching, then confirm it took, then hand
-    /// over to the watch for the rest of the shift. Never throws — the bridge only ever added
-    /// fading on top of a backend that works without it, so anything wrong here costs a fade.
-    /// </summary>
+    /// <summary>Patches if needed, then hands off to the watch. Never throws; costs at worst
+    /// a fade.</summary>
     public async Task RunAsync(CancellationToken cancellationToken = default)
     {
         try
         {
             var applied = false;
 
-            // Everything that patches is behind this one question, asked before the grace rather
-            // than after it. The console comes up before Spotify does, so waiting first would
-            // spend the grace watching for an extension that has nothing to attach to — and then
-            // read its absence as a Spotify needing to be patched.
-            //
-            // That is the bug this ordering exists for. Break music started during the grace, out
-            // of a Spotify the console had just launched; the extension had had no chance to
-            // attach, and applying killed the track the room was listening to.
+            // Checked before the grace: waiting first would read a not-yet-attached extension as unpatched.
             if (await IsPlayingAsync())
             {
-                // Installing applies too, when the shipped extension is newer than the one on
-                // disk. A bridge a version behind still fades; a restart mid-song does not.
+                // Installing also applies when the shipped extension is newer; a version behind still fades.
                 _logger.LogInformation(
                     "Spotify is already playing, so nothing here patches it — that would restart Spotify");
             }
@@ -122,8 +84,7 @@ internal sealed class SpicetifyBridgeSetup
             {
                 await InstallAsync();
 
-                // Discovered after installing, which is what creates the directory on a machine
-                // whose Spicetify has never carried an extension.
+                // Discovered after installing: that's what creates it when Spicetify never had an extension.
                 if (_discover() is { } installation && !installation.IsSpotifyPatched())
                 {
                     if (await ApplyAsync(installation) is SpicetifyInstallOutcome.Failed)
@@ -137,33 +98,26 @@ internal sealed class SpicetifyBridgeSetup
 
             if (_isExtensionReady())
             {
-                // It attached and can drive Spotify, so anything that goes from here is a live
-                // problem rather than a setup one, and is only ever reported.
+                // Working now, so problems from here on are live ones, not setup ones; only ever reported.
                 WatchForLoss(cancellationToken);
                 return;
             }
 
-            // Attached and unable to work is not a patching problem at all, and the extension has
-            // already said so over the socket. Reported as it described itself, because the host
-            // cannot see inside Spotify and every guess it makes from out here is one somebody
-            // then has to disprove.
+            // Attached but unable to work isn't a patching problem; the extension already said so itself.
             if (_diagnose() is { Ready: false, IsVerdict: true } diagnosis)
             {
                 ReportTheExtensionCannotRun(diagnosis);
                 return;
             }
 
-            // Nothing attached at all, and the disk says which of two quite different things that
-            // is. Patching cannot fix a patch that is already there, and reading the silence as a
-            // missing one sends the next person to the wrong half of the search.
+            // Nothing attached: the disk says whether that's an already-applied patch or a missing one.
             if (applied || _discover()?.IsSpotifyPatched() == true)
             {
                 ReportTheExtensionCannotRun(applied);
                 return;
             }
 
-            // The same rule the watch keeps for the rest of the shift: from here it only ever says
-            // so. Restarting Spotify to recover a fade is a worse outcome than a missing fade.
+            // Same rule as the watch from here on: restarting Spotify to recover a fade is worse than none.
             if (await IsPlayingAsync())
             {
                 _context.ReportWarning(
@@ -184,8 +138,7 @@ internal sealed class SpicetifyBridgeSetup
             if (await ApplyAsync(discovered) is SpicetifyInstallOutcome.Failed)
                 return;
 
-            // Given the grace again: applying restarts Spotify, and the extension cannot connect
-            // until it is back up.
+            // Given the grace again; applying just restarted Spotify, and it needs time to come back.
             await _delay(GracePeriod, cancellationToken);
 
             if (!_isExtensionReady())
@@ -206,15 +159,8 @@ internal sealed class SpicetifyBridgeSetup
         }
     }
 
-    /// <summary>
-    /// Says so when the extension goes and stays gone. Never re-applies: a Spotify update during a
-    /// shift is exactly when this fires, and restarting Spotify to fix a fade would take the room's
-    /// music with it.
-    /// </summary>
-    /// <remarks>
-    /// Waits before speaking, because a detach is also what a Spotify restart looks like from here
-    /// and one that comes back is not worth a word. Said once per loss rather than once per poll.
-    /// </remarks>
+    /// <summary>Reports when the extension goes and stays gone; re-applying would restart it.</summary>
+    /// <remarks>Waits before speaking; a detach also looks like an ordinary Spotify restart.</remarks>
     internal Task WatchForLoss(CancellationToken cancellationToken = default) => Task.Run(async () =>
     {
         bool reported = false;
@@ -250,17 +196,8 @@ internal sealed class SpicetifyBridgeSetup
         }
     });
 
-    /// <summary>
-    /// The extension is inside Spotify and still nothing attached, which patching cannot fix —
-    /// applying again writes the same file to the same place and restarts Spotify for nothing.
-    /// </summary>
-    /// <remarks>
-    /// What is left is the extension being unable to run. Spicetify's own API never comes up on a
-    /// Spotify newer than the Spicetify that patched it: <c>Spicetify.Platform</c> stays an empty
-    /// object — measured at a hundred seconds on the machine this was found on — so every
-    /// extension sits in the wait its first line does, having loaded perfectly well. From out here
-    /// that is indistinguishable from an unpatched Spotify, which is why the disk is asked.
-    /// </remarks>
+    /// <summary>The extension is present but unattached, so applying again fixes nothing.</summary>
+    /// <remarks><c>Spicetify.Platform</c> stays empty on a newer Spotify.</remarks>
     private void ReportTheExtensionCannotRun(bool applied) => _context.ReportWarning(
         (applied
             ? "Break music will not fade: KHost patched Spotify with the KHost bridge and the "
@@ -270,15 +207,8 @@ internal sealed class SpicetifyBridgeSetup
         + "runs. Update Spicetify and run 'spicetify backup apply'. Break music still plays, at "
         + "full level throughout.");
 
-    /// <summary>
-    /// The extension is attached and has said it cannot drive Spotify. Its own words are used,
-    /// since it is the only thing that can see, and the fix named is the host's to carry out.
-    /// </summary>
-    /// <remarks>
-    /// Nothing here is platform-specific and nothing here may become so: the fault, the wording
-    /// and the remedy all come from inside Spotify's own client, which is the same client on every
-    /// operating system this plugin runs on.
-    /// </remarks>
+    /// <summary>Reports the extension's own diagnosis from inside Spotify.</summary>
+    /// <remarks>Stays platform-agnostic: the fault and remedy come from Spotify's own client.</remarks>
     private void ReportTheExtensionCannotRun(SpicetifyDiagnosis diagnosis)
     {
         _logger.LogWarning("The Spicetify bridge cannot drive Spotify: {Diagnosis}", diagnosis.Describe());
@@ -295,14 +225,8 @@ internal sealed class SpicetifyBridgeSetup
             + " Break music still plays, at full level throughout.");
     }
 
-    /// <summary>
-    /// Whether the room can hear Spotify right now, which is the one thing that makes restarting
-    /// it expensive.
-    /// </summary>
-    /// <remarks>
-    /// Unknown is taken as playing. Being wrong that way costs a fade; being wrong the other way
-    /// stops the room's music.
-    /// </remarks>
+    /// <summary>Whether the room can hear Spotify now; that is what makes restarting it costly.</summary>
+    /// <remarks>Unknown counts as playing: wrong costs a fade, wrong the other way stops the music.</remarks>
     private async Task<bool> IsPlayingAsync()
     {
         try
@@ -316,10 +240,7 @@ internal sealed class SpicetifyBridgeSetup
         }
     }
 
-    /// <summary>
-    /// Puts the shipped file in place, applying only if it is not already current. Nothing here is
-    /// fatal: a Spicetify that cannot be written to costs a fade, not break music.
-    /// </summary>
+    /// <summary>Installs the shipped file if not current; a failure here costs only a fade.</summary>
     private async Task InstallAsync()
     {
         if (_discover() is not { } installation)
@@ -333,11 +254,7 @@ internal sealed class SpicetifyBridgeSetup
         await _install(installation, false);
     }
 
-    /// <summary>
-    /// Patches Spotify, forcing past the currency check — the caller has established that the
-    /// running Spotify is not patched whatever the config says. Only ever reached where a restart
-    /// of Spotify costs the room nothing.
-    /// </summary>
+    /// <summary>Forces the patch past the currency check; reached only where a restart is free.</summary>
     private async Task<SpicetifyInstallOutcome> ApplyAsync(SpicetifyInstallation installation)
     {
         var outcome = await _install(installation, true);

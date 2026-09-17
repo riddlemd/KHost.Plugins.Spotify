@@ -5,11 +5,8 @@ using KHost.Plugins.Spotify.Bridge;
 
 namespace KHost.Plugins.Spotify.Tests;
 
-/// <summary>
-/// The handshake and framing are hand-rolled because HttpListener's WebSocket support is
-/// Windows-only, so the platforms this bridge exists for get no help from the framework. Asserted
-/// against the RFC's own worked example rather than against itself.
-/// </summary>
+/// <summary>The handshake and framing are hand-rolled because HttpListener's WebSocket support
+/// is Windows-only. Asserted against the RFC's own worked example rather than against itself.</summary>
 public class WebSocketFrameTests
 {
     private static readonly Type Frame =
@@ -36,9 +33,8 @@ public class WebSocketFrameTests
     [Fact]
     public void AcceptFor_MatchesTheWorkedExampleInRfc6455()
     {
-        // RFC 6455 section 1.3. A client that does not see this exact value back refuses the
-        // connection, so getting the salt or the hash wrong fails silently as "extension never
-        // attached" rather than as anything that names itself.
+        // RFC 6455 section 1.3: a client that does not see this exact value back refuses the
+        // connection, so a wrong salt or hash fails silently as "extension never attached".
         Assert.Equal("s3pPLMBiTxaQ9kYGzzhZRbK+xOo=", AcceptFor("dGhlIHNhbXBsZSBub25jZQ=="));
     }
 
@@ -53,11 +49,13 @@ public class WebSocketFrameTests
         Assert.Equal("""{"type":"fade","to":0}""", frame.Value.Payload);
     }
 
+    // 125 is the last length that fits in the header byte, 126 the first needing the extension,
+    // and ushort.MaxValue the largest the header can declare.
     [Theory]
     [InlineData(10)]
-    [InlineData(125)]      // the last length that fits in the header byte
-    [InlineData(126)]      // the first that needs the two-byte extension
-    [InlineData(ushort.MaxValue)]   // the largest the header can declare
+    [InlineData(125)]
+    [InlineData(126)]
+    [InlineData(ushort.MaxValue)]
     public async Task Encode_CarriesEveryLengthTheReaderWillTake(int length)
     {
         var payload = new string('x', length);
@@ -119,10 +117,8 @@ public class WebSocketFrameTests
     }
 }
 
-/// <summary>
-/// The guard cannot be reached through the socket — the listener binds to loopback, so nothing
-/// else can arrive to be refused — which is exactly why it is asserted directly.
-/// </summary>
+/// <summary>The guard cannot be reached through the socket: the listener binds to loopback, so
+/// nothing else can arrive to be refused, which is why it is asserted directly.</summary>
 public class BridgeOriginTests
 {
     [Theory]

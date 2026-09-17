@@ -3,11 +3,8 @@ using System.Text;
 
 namespace KHost.Plugins.Spotify.Tests;
 
-/// <summary>
-/// Stands in for the Spicetify extension, using the framework's own client so the bridge is held
-/// to what a browser actually sends — masked frames, a real handshake — rather than to a
-/// convenient reading of the protocol it was written against.
-/// </summary>
+/// <summary>Stands in for the Spicetify extension, using the framework's own client so the
+/// bridge is held to what a browser actually sends, masked frames and a real handshake.</summary>
 public sealed class FakeExtension : IAsyncDisposable
 {
     private readonly ClientWebSocket _socket;
@@ -28,18 +25,15 @@ public sealed class FakeExtension : IAsyncDisposable
 
         var extension = new FakeExtension(socket);
 
-        // Sent before the caller gets it, because nothing the bridge does for an extension happens
-        // until one has said it can work — the same order the real extension keeps. The caller
-        // waits for the bridge to have read it; only the caller can see the bridge.
+        // Sent before the caller gets it: nothing the bridge does happens until one has said it
+        // can work, the order the real extension keeps, so the caller waits for the bridge to read it.
         await extension.SendAsync(Diagnosis(ready));
 
         return extension;
     }
 
-    /// <summary>
-    /// Attaches without saying anything about itself, which every extension does for the moment
-    /// between its socket opening and its first report arriving.
-    /// </summary>
+    /// <summary>Attaches without saying anything about itself, which every extension does for
+    /// the moment between its socket opening and its first report arriving.</summary>
     public static async Task<FakeExtension> ConnectSilentAsync(int port)
     {
         var socket = new ClientWebSocket();
@@ -63,10 +57,8 @@ public sealed class FakeExtension : IAsyncDisposable
     public Task SendAsync(string json) => _socket.SendAsync(
         Encoding.UTF8.GetBytes(json), WebSocketMessageType.Text, endOfMessage: true, CancellationToken.None);
 
-    /// <summary>
-    /// The next command the bridge sends. Bounded, because a test that hangs waiting for a message
-    /// the bridge never sent reads as a build that stopped rather than as a failure.
-    /// </summary>
+    /// <summary>The next command the bridge sends. Bounded, because a test that hangs waiting
+    /// for a message the bridge never sent reads as a build that stopped, not a failure.</summary>
     public async Task<string> NextAsync()
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));

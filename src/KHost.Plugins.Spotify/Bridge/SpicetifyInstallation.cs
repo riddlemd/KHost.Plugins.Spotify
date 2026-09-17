@@ -1,10 +1,7 @@
 namespace KHost.Plugins.Spotify.Bridge;
 
-/// <summary>
-/// Where Spicetify lives on this machine and whether the bridge extension is already part of it.
-/// Path and file work only — the CLI is spawned to apply a change, never to find out whether one
-/// is needed, so a host who is already set up pays nothing on every start.
-/// </summary>
+/// <summary>Where Spicetify lives on this machine and whether the bridge extension is already
+/// part of it. Path and file work only: the CLI runs only to apply a change, never to check one.</summary>
 public sealed class SpicetifyInstallation
 {
     public const string ExtensionFileName = "khost-bridge.js";
@@ -20,20 +17,8 @@ public sealed class SpicetifyInstallation
 
     public string ConfigFilePath => Path.Combine(ConfigDirectory, ConfigFileName);
 
-    /// <summary>
-    /// Whether the Spotify on this machine is actually carrying the extension — the only question
-    /// worth asking, and the one nothing else here answers.
-    /// </summary>
-    /// <remarks>
-    /// Not the exit code: <c>spicetify apply</c> over a Spotify it cannot patch warns and exits
-    /// zero, which is how an installer came to log that Spotify had been restarted to pick the
-    /// extension up while leaving it nowhere near Spotify. Not the config line either, nor the
-    /// file in Spicetify's own Extensions folder: both stay true after a Spotify update reverts
-    /// the patch, which is exactly the case this has to catch.
-    ///
-    /// Applying replaces <c>Apps/xpui.spa</c> with an extracted <c>Apps/xpui/</c> directory and
-    /// writes the extension inside it, so the file being there is the patch being live.
-    /// </remarks>
+    /// <summary>Whether Spotify is actually carrying the extension, not just configured or copied.</summary>
+    /// <remarks>Neither the exit code nor the config survives a Spotify update reverting the patch.</remarks>
     public bool IsSpotifyPatched()
     {
         if (SpotifyResourcesDirectory is not { } resources)
@@ -53,10 +38,8 @@ public sealed class SpicetifyInstallation
         }
     }
 
-    /// <summary>
-    /// Spotify's Resources folder, as Spicetify's own config records it. Read from there rather
-    /// than guessed, because a host may have Spotify somewhere this plugin would never look.
-    /// </summary>
+    /// <summary>Spotify's Resources folder, as Spicetify's own config records it. Read from there
+    /// rather than guessed, since a host may have Spotify somewhere this plugin would never look.</summary>
     public string? SpotifyResourcesDirectory => ReadConfigValue("spotify_path");
 
     private string? ReadConfigValue(string key)
@@ -126,11 +109,8 @@ public sealed class SpicetifyInstallation
         return null;
     }
 
-    /// <summary>
-    /// True only when the file on disk is the one this build ships and the config already lists it.
-    /// Both halves matter: a stale copy fades against an older protocol, and a copy Spicetify was
-    /// never told about is not loaded at all.
-    /// </summary>
+    /// <summary>True only when the file on disk is the one this build ships and the config already
+    /// lists it: a stale copy fades against an older protocol, and an unregistered one never loads.</summary>
     public bool IsExtensionCurrent(string sourcePath)
     {
         try

@@ -5,18 +5,8 @@ using System.Runtime.Versioning;
 
 namespace KHost.Plugins.Spotify.Control;
 
-/// <summary>
-/// Drives Spotify with the keyboard's media keys, which is the only transport Windows offers
-/// without reading anything back out of the app.
-/// </summary>
-/// <remarks>
-/// The keys are global, so they reach whichever app currently owns media focus — normally
-/// Spotify, but not guaranteed on a machine running another player. Windows also has a
-/// play/pause toggle and no discrete play or pause, so a command has to know which way the
-/// toggle will land: <see cref="GetStateAsync"/> reads that from the system media session
-/// rather than remembering what was last sent, which is what keeps a host who pressed play in
-/// Spotify's own window from being toggled back off.
-/// </remarks>
+/// <summary>Drives Spotify with the keyboard's media keys, reading nothing back from the app.</summary>
+/// <remarks>Only one toggle exists; <see cref="GetStateAsync"/> decides which way it lands.</remarks>
 [SupportedOSPlatform("windows")]
 public sealed class WindowsSpotifyController : ISpotifyController
 {
@@ -109,11 +99,8 @@ public sealed class WindowsSpotifyController : ISpotifyController
         return Task.CompletedTask;
     }
 
-    /// <summary>
-    /// Decides whether the one key Windows offers would land the right way up. Unknown state
-    /// sends it: a backend that cannot see is no worse off than the old remembered flag, and
-    /// doing nothing would leave a host pressing play to silence.
-    /// </summary>
+    /// <summary>Decides whether the one key Windows offers would land the right way up. Unknown
+    /// state sends it: a backend that cannot see is no worse off than doing nothing.</summary>
     internal static bool ShouldSendToggle(SpotifyState? state, SpotifyPlayback target)
     {
         if (state is null)
@@ -137,18 +124,13 @@ public sealed class WindowsSpotifyController : ISpotifyController
     }
 
 #if WINDOWS_MEDIA_SESSION
-    /// <summary>
-    /// Held for the life of this controller: the session raises nothing once it is collected, and
-    /// a watch that stops after the first garbage collection is worse than no watch at all.
-    /// </summary>
+    /// <summary>Held for the life of this controller: the session raises nothing once it is
+    /// collected, and a watch that stops after garbage collection is worse than no watch.</summary>
     private Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager? _sessionManager;
     private Windows.Media.Control.GlobalSystemMediaTransportControlsSession? _watchedSession;
 
-    /// <summary>
-    /// Subscribes to Spotify's own row on the system media transport, so a host pressing pause in
-    /// Spotify's window or on the keyboard reaches the console without anything polling all shift.
-    /// Sessions come and go with the app, so the manager is watched too and the session re-bound.
-    /// </summary>
+    /// <summary>Subscribes to Spotify's own row on the system media transport, so a host pressing
+    /// pause in Spotify's window reaches the console without polling all shift.</summary>
     public async Task StartWatchingAsync(CancellationToken cancellationToken = default)
     {
         try
@@ -194,17 +176,8 @@ public sealed class WindowsSpotifyController : ISpotifyController
         }
     }
 
-    /// <summary>
-    /// One turn of a track raises both of the events above, about a millisecond apart, and each
-    /// one costs the host a read. Only the last raise in a window gets through, so a subscriber
-    /// hears once per change rather than once per event.
-    /// </summary>
-    /// <remarks>
-    /// Trailing edge, not leading: the second event of a pair is the one carrying the settled
-    /// track, and dropping it would report the change a beat early with the old name. A counter
-    /// rather than a timer, so there is nothing to dispose on a controller that lives as long as
-    /// the process.
-    /// </remarks>
+    /// <summary>Both events above fire per turn; only the last raise in a window gets through.</summary>
+    /// <remarks>Trailing edge: the second event carries the settled track name.</remarks>
     private void RaiseCoalesced()
     {
         var generation = Interlocked.Increment(ref _raiseGeneration);
@@ -218,11 +191,8 @@ public sealed class WindowsSpotifyController : ISpotifyController
             TaskScheduler.Default);
     }
 
-    /// <summary>
-    /// Reads Spotify's own row on the system media transport — the same one the volume flyout
-    /// shows. Filtered by session id rather than taking the current session, so another player
-    /// holding media focus reports as itself instead of being mistaken for Spotify.
-    /// </summary>
+    /// <summary>Reads Spotify's own row on the system media transport, the same one the volume
+    /// flyout shows, filtered by session id so another focused player is not mistaken for it.</summary>
     public async Task<SpotifyState?> GetStateAsync(CancellationToken cancellationToken = default)
     {
         try

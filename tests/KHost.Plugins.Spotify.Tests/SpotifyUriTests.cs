@@ -52,10 +52,8 @@ public class SpotifyUriTests
     public void Normalize_ContextThatCannotCarryABed_IsNull(string value)
         => Assert.Null(SpotifyUri.Normalize(value));
 
-    /// <summary>
-    /// The id is interpolated into an AppleScript literal and a D-Bus argument, so anything
-    /// outside base62 has to be refused rather than escaped.
-    /// </summary>
+    /// <summary>The id feeds an AppleScript literal and a D-Bus argument, so anything outside
+    /// base62 has to be refused rather than escaped.</summary>
     [Theory]
     [InlineData("spotify:playlist:abc\" & (do shell script \"rm -rf ~\") & \"")]
     [InlineData("spotify:playlist:abc 123")]

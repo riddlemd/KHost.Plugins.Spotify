@@ -5,16 +5,8 @@ using Microsoft.Extensions.Logging;
 
 namespace KHost.Plugins.Spotify.Bridge;
 
-/// <summary>
-/// The plugin's end of the Spicetify extension. Spotify's own transport surface offers no volume
-/// on Windows and only a process spawn per step on macOS, so the one thing this exists to carry is
-/// a fade: the extension runs inside the client and can ramp the volume in JavaScript, for free.
-/// </summary>
-/// <remarks>
-/// The extension dials in rather than the plugin dialling out — nothing outside the Spotify client
-/// can reach into it, and a browser context cannot listen. Loopback only: a bridge reachable off
-/// the machine would let anything on the room's wifi drive the host's music.
-/// </remarks>
+/// <summary>The plugin's end of the Spicetify extension: the one way to ramp Spotify's own volume.</summary>
+/// <remarks>Loopback only, since the extension dials in rather than the plugin dialing out.</remarks>
 public sealed class SpicetifyBridge : IDisposable
 {
     private readonly ILogger _logger;
@@ -25,10 +17,8 @@ public sealed class SpicetifyBridge : IDisposable
     private Stream? _client;
     private readonly SemaphoreSlim _writing = new(1, 1);
 
-    /// <summary>
-    /// Completed when the extension says the ramp finished. Held here rather than correlated by id
-    /// because a newer fade supersedes an older one at the other end too — there is only ever one.
-    /// </summary>
+    /// <summary>Completed when the extension says the ramp finished. Held here rather than
+    /// correlated by id: a newer fade supersedes an older one at the other end too.</summary>
     private TaskCompletionSource<bool>? _fading;
 
     public SpicetifyBridge(ILogger logger, int port)
@@ -37,31 +27,24 @@ public sealed class SpicetifyBridge : IDisposable
         _port = port;
     }
 
-    /// <summary>Raised when the extension reports Spotify moved, so the provider need not poll for it.</summary>
+    /// <summary>Raised when the extension reports Spotify moved, so the provider need not poll.</summary>
     public event EventHandler<SpicetifyState>? StateReceived;
 
-    /// <summary>Whether an extension is attached right now. False is the ordinary case: most hosts install nothing.</summary>
+    /// <summary>False is the ordinary case: most hosts install no extension at all.</summary>
     public bool IsConnected => _client is not null;
 
     public SpicetifyState? LastState { get; private set; }
 
-    /// <summary>
-    /// What the attached extension last said about its own health, or null while nothing has said
-    /// anything. Sent on every connection, so a host that outlives a Spotify restart is told again.
-    /// </summary>
+    /// <summary>What the attached extension last said about its own health, or null while nothing
+    /// has said anything. Sent on every connection, so a restarted Spotify is told again.</summary>
     public SpicetifyDiagnosis? LastDiagnosis { get; private set; }
 
-    /// <summary>
-    /// Attached <b>and</b> able to drive Spotify. This, not <see cref="IsConnected"/>, is what a
-    /// caller wanting a fade has to ask: the extension opens the socket before it knows whether it
-    /// can work, so an attached one may be able to do nothing at all.
-    /// </summary>
+    /// <summary>Attached <b>and</b> able to drive Spotify. Not the same as <see cref="IsConnected"/>:
+    /// the extension opens the socket before it knows whether it can work.</summary>
     public bool IsReady => IsConnected && LastDiagnosis is { Ready: true };
 
-    /// <summary>
-    /// Begins listening. Never throws: a port already taken is a bridge that does not run, not a
-    /// plugin that fails to load, and break music still works through the ordinary backend.
-    /// </summary>
+    /// <summary>Never throws: a port already taken is a bridge that does not run, not a plugin
+    /// that fails to load, and break music still works through the ordinary backend.</summary>
     public void Start()
     {
         try
@@ -79,49 +62,28 @@ public sealed class SpicetifyBridge : IDisposable
         _ = Task.Run(() => AcceptLoopAsync(_stopping.Token));
     }
 
-    /// <summary>
-    /// Ramps the volume and then pauses, as one command. Paired here rather than by the caller
-    /// because the gap between a fade finishing and a pause arriving is a gap the room hears, and
-    /// the extension is the only end that has neither a socket nor a process in the middle.
-    /// </summary>
-    /// <remarks>
-    /// The level being faded away from is remembered at the far end, so
-    /// <see cref="PlayWithFadeInAsync"/> comes back to it. Kept there rather than here because
-    /// Spotify rounds what it reports, and a level read back and restored walks down a point per
-    /// fade.
-    /// </remarks>
+    /// <summary>Paired here, not by the caller: the pause-after-fade gap is one the room hears.</summary>
+    /// <remarks>Kept at the far end since Spotify rounds its reported level on every read.</remarks>
     public Task<bool> PauseWithFadeOutAsync(TimeSpan over, CancellationToken cancellationToken = default)
         => RampAsync(new { type = "pauseWithFadeOut", ms = (int)over.TotalMilliseconds }, over, cancellationToken);
 
-    /// <summary>
-    /// Starts playing silent and comes up to the level the fade out was taken from. Neither end of
-    /// the pair carries a level: out is always to silence, and in is always back to what silence
-    /// was faded away from.
-    /// </summary>
+    /// <summary>Comes up to the level the fade out was taken from. Neither end of the pair carries
+    /// a level: out is always to silence, in is always back to what silence was faded away from.</summary>
     public Task<bool> PlayWithFadeInAsync(TimeSpan over, CancellationToken cancellationToken = default)
         => RampAsync(new { type = "playWithFadeIn", ms = (int)over.TotalMilliseconds }, over, cancellationToken);
 
-    /// <summary>
-    /// Goes quiet, remembering the level being left. The half of a fade out with no pause on the
-    /// end of it, for the two moves the extension cannot make on its own: the backend is about to
-    /// load a playlist or end a session, and only it can do either.
-    /// </summary>
+    /// <summary>Goes quiet, remembering the level being left. The half of a fade out with no pause,
+    /// for when the backend is about to load a playlist or end a session on its own.</summary>
     public Task<bool> SilenceAsync(TimeSpan over, CancellationToken cancellationToken = default)
         => RampAsync(new { type = "silence", ms = (int)over.TotalMilliseconds }, over, cancellationToken);
 
-    /// <summary>
-    /// Back to the level the silence was taken from, which is the other half. Carries no level for
-    /// the same reason <see cref="PlayWithFadeInAsync"/> does not: the room's setting is Spotify's
-    /// to hold and this end has never been told it.
-    /// </summary>
+    /// <summary>Back to the level the silence was taken from. Carries no level for the same reason
+    /// <see cref="PlayWithFadeInAsync"/> does not: the room's setting is Spotify's to hold.</summary>
     public Task<bool> RestoreAsync(TimeSpan over, CancellationToken cancellationToken = default)
         => RampAsync(new { type = "restore", ms = (int)over.TotalMilliseconds }, over, cancellationToken);
 
-    /// <summary>
-    /// Sends a command that takes time at the far end and waits for it to say so. The await covers
-    /// the whole ramp rather than the send, because the caller's next move is the thing the ramp
-    /// exists to happen before.
-    /// </summary>
+    /// <summary>Sends a command that takes time at the far end and waits for it to say so. The
+    /// await covers the whole ramp, since the caller's next move waits on the ramp finishing.</summary>
     private async Task<bool> RampAsync(object command, TimeSpan over, CancellationToken cancellationToken)
     {
         var finished = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -229,11 +191,8 @@ public sealed class SpicetifyBridge : IDisposable
         }
     }
 
-    /// <summary>
-    /// Belt and braces over binding to loopback: the bind is what keeps anything else out today,
-    /// and this is what keeps it out if the bind is ever widened. What arrives here can start and
-    /// stop the room's music.
-    /// </summary>
+    /// <summary>Belt and braces over binding to loopback: this is what keeps the room's music safe
+    /// if the bind is ever widened.</summary>
     internal static bool IsFromThisMachine(EndPoint? remote)
         => remote is IPEndPoint endpoint && IPAddress.IsLoopback(endpoint.Address);
 
@@ -288,7 +247,8 @@ public sealed class SpicetifyBridge : IDisposable
         catch { /* the caller has gone; nothing to say to it */ }
     }
 
-    /// <summary>Only clears the current client, so a replaced connection's teardown cannot unhook its successor.</summary>
+    /// <summary>Only clears the current client, so a replaced connection's teardown cannot unhook
+    /// its successor.</summary>
     private void Drop(Stream stream)
     {
         if (!ReferenceEquals(_client, stream)) return;

@@ -40,7 +40,7 @@ public class SpotifyBreakMusicProviderTests
     }
 
     // The host put break music on themselves while waiting for a first singer. Starting again
-    // must not send a command — on Windows that is one key, and it would stop the room's music.
+    // must not send a command: on Windows that is one key, and it would stop the room's music.
     [Fact]
     public async Task StartAsync_SpotifyAlreadyPlaying_LeavesItAloneAndReportsSuccess()
     {
@@ -222,7 +222,7 @@ public class SpotifyBreakMusicProviderTests
     }
 
     // Reads bracket the skip: one for what it is leaving, one for what it landed on. The point of
-    // asserting the whole list is that nothing else — no play, pause or stop — goes with it.
+    // asserting the whole list is that nothing else, no play, pause or stop, goes with it.
     [Fact]
     public async Task SkipAsync_SkipsToTheNextTrackAndReadsBackWhatItLandedOn()
     {
@@ -252,11 +252,8 @@ public class SpotifyBreakMusicProviderTests
         Assert.Equal("Manic Monday", provider.CurrentTrack!.Title);
     }
 
-    /// <summary>
-    /// Spotify's level is the host's own setting, in an app they can see. KHost pushes the venue
-    /// volume at every provider it cannot mix, and this one has to decline it rather than move a
-    /// slider out from under them.
-    /// </summary>
+    /// <summary>Spotify's level is the host's own setting, in an app they can see. KHost pushes
+    /// the venue volume everywhere it can, and this one has to decline rather than move a slider.</summary>
     [Theory]
     [InlineData(0f)]
     [InlineData(0.35f)]
@@ -276,11 +273,8 @@ public class SpotifyBreakMusicProviderTests
         Assert.Equal(["stop"], _controller.Calls);
     }
 
-    /// <summary>
-    /// The fade hint is ignored outright. KHost suspends break music before it loads a song and
-    /// waits on it, and the ramp this used to run was a process spawn per step — a two second
-    /// fade held the console for nearly five with the singer stood there.
-    /// </summary>
+    /// <summary>The fade hint is ignored outright: KHost suspends break music before it loads a
+    /// song and waits on it, so there is no gap for a fade to fill.</summary>
     [Fact]
     public async Task StopAsync_AFadeAsked_StopsAtOnceWithoutTouchingTheVolume()
     {

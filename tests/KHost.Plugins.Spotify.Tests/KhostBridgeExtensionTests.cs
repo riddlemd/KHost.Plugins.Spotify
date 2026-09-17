@@ -2,11 +2,8 @@ using System.Diagnostics;
 
 namespace KHost.Plugins.Spotify.Tests;
 
-/// <summary>
-/// The extension runs inside Spotify's own JS engine, not .NET, so its only test surface is a
-/// browser-shaped stub run under node. This just shells out and surfaces node's own failures; the
-/// real assertions live in tests/extension/khost-bridge.test.mjs.
-/// </summary>
+/// <summary>The extension runs inside Spotify's own JS engine, not .NET, so its only test surface
+/// is a browser-shaped stub run under node; the real assertions live in khost-bridge.test.mjs.</summary>
 public class KhostBridgeExtensionTests
 {
     [RequiresNodeFact]
@@ -32,11 +29,8 @@ public class KhostBridgeExtensionTests
         Assert.True(process.ExitCode == 0, $"node --test failed (exit {process.ExitCode}):\n{stdout}\n{stderr}");
     }
 
-    /// <summary>
-    /// The JS suite deliberately lives outside any .NET project (no build step of its own), so it
-    /// is not copied to the test binary's output directory the way a project item would be — this
-    /// walks up from there to the checkout that still has it.
-    /// </summary>
+    /// <summary>The JS suite lives outside any .NET project, so it is not copied to the test
+    /// binary's output directory; this walks up from there to the checkout that still has it.</summary>
     private static string FindTestFile()
     {
         var dir = AppContext.BaseDirectory;

@@ -8,11 +8,8 @@ using Microsoft.Extensions.Logging;
 
 namespace KHost.Plugins.Spotify;
 
-/// <summary>
-/// Break music out of the Spotify desktop app on this machine. The host carries none of this
-/// audio — it leaves Spotify's own output — so there is nothing to route to a screen or a Cast
-/// device, and nothing here touches the level: that one is set in Spotify, by whoever set it.
-/// </summary>
+/// <summary>Break music out of the Spotify desktop app on this machine. The host carries none of
+/// this audio, so nothing here routes it to a screen or Cast, and nothing here touches the level.</summary>
 public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
 {
     /// <summary>Up to a second and a half, which is longer than Spotify has needed to turn a
@@ -59,9 +56,8 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
 
             if (SpicetifyInstallation.FindCli() is { } cli)
             {
-                // Off the constructor: this patches Spotify and restarts it on the first run,
-                // which is far too slow to hold up the host starting. It settles long before a
-                // break, and asks whether Spotify is playing before it touches anything.
+                // Off the constructor: this patches Spotify and restarts it on first run, which is
+                // too slow to hold up the host starting. It asks whether Spotify is playing first.
                 var spotify = platform;
 
                 _ = Task.Run(() => SpicetifyBridgeSetup.ForThisMachine(
@@ -124,18 +120,14 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
 
     public bool RendersThroughHost => false;
 
-    /// <summary>
-    /// The last track a command saw. A property cannot go and ask, so this is refreshed by the
-    /// transport calls rather than polled — the console names what is on without this provider
-    /// putting a timer on Spotify for a whole shift.
-    /// </summary>
+    /// <summary>A property cannot go and ask, so this is refreshed by the transport calls rather
+    /// than polled, naming what is on without putting a timer on Spotify for a whole shift.</summary>
     public BreakMusicTrack? CurrentTrack { get; private set; }
 
     public async Task<bool> StartAsync(CancellationToken cancellationToken = default)
     {
         // Asked before anything is sent: a host who put Spotify on themselves while waiting for a
-        // first singer is already doing what was wanted, and the console should say so rather than
-        // the controller deciding on its own.
+        // first singer is already doing what was wanted, and the console should say so.
         var before = await _controller.GetStateAsync(cancellationToken);
 
         if (before?.Playback == SpotifyPlayback.Playing)
@@ -167,24 +159,17 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
     public Task ResumeAsync(CancellationToken cancellationToken = default)
         => _controller.ResumeAsync(cancellationToken);
 
-    /// <summary>
-    /// <paramref name="fadeDuration"/> is ignored. Fading meant ramping Spotify's own volume,
-    /// which is the host's setting to keep — and each step was a process spawn, so a two second
-    /// fade blocked the console for nearly five before the next song could load.
-    /// </summary>
+    /// <summary><paramref name="fadeDuration"/> is ignored. Ramping Spotify's own volume is the
+    /// host's setting to keep, and each step was a process spawn that blocked the console.</summary>
     public Task StopAsync(TimeSpan? fadeDuration = null, CancellationToken cancellationToken = default)
         => _controller.StopAsync(cancellationToken);
 
-    /// <summary>
-    /// Reads the track back afterwards: skipping is the one command that changes what is playing,
-    /// and the console re-renders on the host's own announcement — reading nothing here leaves it
-    /// naming the track that was skipped past.
-    /// </summary>
+    /// <summary>Skipping is the one command that changes what is playing, so this reads the track
+    /// back afterwards instead of trusting the console's last render of it.</summary>
     public async Task SkipAsync(CancellationToken cancellationToken = default)
     {
         // Read rather than taken from CurrentTrack: Spotify moves on by itself as tracks end, so
-        // what the console last showed may already be behind, and a settle that compared against
-        // it would stop on the track this skip was leaving.
+        // a settle compared against the last shown track would stop on the one being left.
         var before = (await _controller.GetStateAsync(cancellationToken))?.Title;
 
         await _controller.SkipAsync(cancellationToken);
@@ -192,13 +177,8 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
         CurrentTrack = ToTrack(await ReadSettledStateAsync(before, cancellationToken));
     }
 
-    /// <summary>
-    /// Skipping is asked for and answered later, so a read taken straight afterwards still names
-    /// the track being skipped past. Polled rather than slept on a fixed delay: a machine that
-    /// turns the track over quickly is not made to wait for the worst case, and one that does not
-    /// still lands on the right name. A read with no track to name is taken as it comes — there is
-    /// nothing to wait for — and giving up returns the last read rather than the stale one.
-    /// </summary>
+    /// <summary>Polled rather than slept a fixed delay, so a quick machine is not held to the worst
+    /// case; giving up returns the last read rather than the stale title being skipped past.</summary>
     private async Task<SpotifyState?> ReadSettledStateAsync(string? previousTitle, CancellationToken cancellationToken)
     {
         SpotifyState? state = null;
@@ -216,14 +196,12 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
         return state;
     }
 
-    /// <summary>
-    /// Deliberately nothing. Spotify's level belongs to whoever set it there, and the host has no
-    /// business moving a slider the person running the room can see in another app.
-    /// </summary>
+    /// <summary>Deliberately nothing: Spotify's level belongs to whoever set it there, not to a
+    /// slider the host can move behind the room's back.</summary>
     public Task SetVolumeAsync(float volume, CancellationToken cancellationToken = default)
         => Task.CompletedTask;
 
-    /// <summary>The copy beside this assembly, not the host's base directory — a plugin runs out of
+    /// <summary>The copy beside this assembly, not the host's base directory: a plugin runs out of
     /// its own folder under plugins/.</summary>
     private static string ShippedExtensionPath => Path.Combine(
         Path.GetDirectoryName(typeof(SpotifyBreakMusicProvider).Assembly.Location) ?? string.Empty,

@@ -2,10 +2,8 @@ using KHost.Plugins.Spotify.Control;
 
 namespace KHost.Plugins.Spotify.Tests;
 
-/// <summary>
-/// Records the calls in order. Hand-rolled rather than substituted so a test can assert what was
-/// sent to Spotify and, just as importantly, that nothing else was.
-/// </summary>
+/// <summary>Records the calls in order. Hand-rolled rather than substituted so a test can assert
+/// what was sent to Spotify and, just as importantly, that nothing else was.</summary>
 public sealed class FakeSpotifyController : ISpotifyController
 {
     public List<string> Calls { get; } = [];
@@ -17,10 +15,8 @@ public sealed class FakeSpotifyController : ISpotifyController
     /// <summary>Stands in for Spotify moving without being asked.</summary>
     public void RaisePlaybackChanged() => PlaybackChanged?.Invoke(this, EventArgs.Empty);
 
-    /// <summary>
-    /// Kept off <see cref="Calls"/> on purpose: that list is what tests assert commands against,
-    /// and a watch is not a command a host issued.
-    /// </summary>
+    /// <summary>Kept off <see cref="Calls"/> on purpose: that list is what tests assert commands
+    /// against, and a watch is not a command a host issued.</summary>
     public bool WatchStarted { get; private set; }
 
     public Task StartWatchingAsync(CancellationToken cancellationToken = default)
@@ -38,10 +34,8 @@ public sealed class FakeSpotifyController : ISpotifyController
     /// <summary>What the backend reports. Null stands for a backend that cannot see.</summary>
     public SpotifyState? State { get; set; } = SpotifyState.Stopped;
 
-    /// <summary>
-    /// Reads to hand out before falling back to <see cref="State"/>. Lets a test stand a transport
-    /// up that answers with the old track first, the way a real one does until a skip lands.
-    /// </summary>
+    /// <summary>Reads to hand out before falling back to <see cref="State"/>, so a test can stand
+    /// a transport up that answers with the old track first, until a skip lands.</summary>
     public Queue<SpotifyState?> QueuedStates { get; } = new();
 
     public Task<SpotifyState?> GetStateAsync(CancellationToken cancellationToken = default)
