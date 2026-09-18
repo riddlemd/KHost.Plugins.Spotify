@@ -39,8 +39,8 @@
          the KHost checkout beside it changed branch, and an outside author has no such checkout at
          all. The package's own targets keep them out of this project's output, so nothing
          downstream loses them. -->
-    <PackageReference Include="KHost.Abstractions" Version="0.7.0" />
-    <PackageReference Include="KHost.Common" Version="0.7.0" />
+    <PackageReference Include="KHost.Abstractions" Version="0.12.0" />
+    <PackageReference Include="KHost.Common" Version="0.12.0" />
 
     <!-- Came in through KHost.Plugins.Sdk before it was folded into Abstractions, which declares
          contracts and takes no packages of its own. The host has this loaded, so a shipped copy
