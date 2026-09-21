@@ -48,7 +48,8 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
 
         if (settings.SpicetifyBridge && controller is null)
         {
-            _bridge = new SpicetifyBridge(logger, settings.SpicetifyBridgePort);
+            _bridge = new SpicetifyBridge(
+                logger, settings.SpicetifyBridgePort, settings.RecoverStalledPlayback);
             _bridge.Start();
 
             platform = new BridgedSpotifyController(

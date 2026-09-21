@@ -20,4 +20,9 @@ public class SpotifySettings
 
     /// <summary>Milliseconds. Zero turns fading off while leaving the bridge itself up.</summary>
     public int FadeMilliseconds { get; set; } = 1500;
+
+    /// <summary>Works around Spotify ending a track without starting the next: the extension
+    /// presses play, then skips, when a track stops at its own end with something still queued.
+    /// Needs the bridge, since only the extension is inside the client to see it.</summary>
+    public bool RecoverStalledPlayback { get; set; } = true;
 }

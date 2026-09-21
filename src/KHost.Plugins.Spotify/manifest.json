@@ -14,6 +14,7 @@
     { "key": "launchIfNotRunning", "type": "bool", "section": "Break music", "label": "Launch Spotify if it is not already running", "default": true },
     { "key": "spicetifyBridge", "type": "bool", "section": "Spicetify bridge", "label": "Listen for the KHost Spicetify extension (enables fading)", "default": true },
     { "key": "spicetifyBridgePort", "type": "int", "section": "Spicetify bridge", "label": "Port the extension connects on (loopback only)", "default": 8974 },
-    { "key": "fadeMilliseconds", "type": "int", "section": "Spicetify bridge", "label": "Fade length in milliseconds (0 turns fading off)", "default": 1500 }
+    { "key": "fadeMilliseconds", "type": "int", "section": "Spicetify bridge", "label": "Fade length in milliseconds (0 turns fading off)", "default": 1500 },
+    { "key": "recoverStalledPlayback", "type": "bool", "section": "Bug Fixes", "label": "Nudge Spotify when it ends a track without starting the next", "default": true }
   ]
 }

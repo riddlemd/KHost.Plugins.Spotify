@@ -4,7 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { loadExtension, connectExtension, lastFaded, diagnoses } from './harness.mjs';
+import { loadExtension, connectExtension, lastFaded, diagnoses, fire, messagesOfType } from './harness.mjs';
 
 // ── each command reaches its handler ────────────────────────────────────────────────
 
@@ -517,4 +517,250 @@ test('a connect failure before the socket ever opens also retries', async (t) =>
 
   assert.equal(ext.clock.scheduled.length, 1);
   assert.equal(ext.clock.scheduled[0], 1000);
+});
+
+// ── recovering from Spotify stalling at the end of a track ──────────────────────────
+//
+// Spotify sometimes ends a track without starting the next: playback stops outright, or the next
+// loads and sits at 0:00. Both reach the extension as an unasked-for pause, and the workaround a
+// host would do by hand is pressing play, then skipping.
+
+/** Puts the player where a stall leaves it and fires the event the client would. */
+async function stall(ext, { progressMs, durationMs = 180000 }) {
+  ext.player.progressMs = progressMs;
+  ext.player.durationMs = durationMs;
+  ext.player.playing = false;
+  fire(ext, 'onplaypause');
+  await ext.clock.drain();
+}
+
+test('a track that ends without advancing is nudged back into playing', async (t) => {
+  const ext = connectExtension();
+  t.after(ext.dispose);
+
+  await stall(ext, { progressMs: 179000 });
+
+  assert.equal(ext.player.playing, true);
+  assert.deepEqual(messagesOfType(ext, 'recovered').map((m) => m.how), ['play']);
+});
+
+test('a next track sitting at zero is nudged too, but only just after a song change', async (t) => {
+  const ext = connectExtension();
+  t.after(ext.dispose);
+
+  fire(ext, 'songchange');
+  await stall(ext, { progressMs: 0 });
+
+  assert.equal(ext.player.playing, true);
+  assert.equal(messagesOfType(ext, 'recovered').length, 1);
+});
+
+test('play alone not working falls through to skipping, and says which worked', async (t) => {
+  const ext = connectExtension();
+  t.after(ext.dispose);
+
+  // Play is accepted and then undone, the way a wedged client behaves.
+  ext.player.play = () => { ext.player.playing = false; };
+
+  await stall(ext, { progressMs: 179500 });
+
+  assert.equal(ext.player.nextCalls, 1);
+  assert.deepEqual(messagesOfType(ext, 'recovered').map((m) => m.how), ['next']);
+});
+
+// ── and the cases it must leave alone ───────────────────────────────────────────────
+
+test('a pause the host asked for is never undone', async (t) => {
+  const ext = connectExtension();
+  t.after(ext.dispose);
+
+  ext.socket.receive(JSON.stringify({ type: 'pauseWithFadeOut', ms: 16 }));
+  await ext.clock.drain();
+
+  // Exactly where a stall would look like one, so only the host's own pause distinguishes it.
+  await stall(ext, { progressMs: 179000 });
+
+  assert.equal(ext.player.playing, false);
+  assert.equal(messagesOfType(ext, 'recovered').length, 0);
+  assert.equal(ext.player.nextCalls, 0);
+});
+
+test('the host playing again clears that, so a later stall still recovers', async (t) => {
+  const ext = connectExtension();
+  t.after(ext.dispose);
+
+  ext.socket.receive(JSON.stringify({ type: 'pauseWithFadeOut', ms: 16 }));
+  await ext.clock.drain();
+  ext.socket.receive(JSON.stringify({ type: 'playWithFadeIn', ms: 16 }));
+  await ext.clock.drain();
+
+  await stall(ext, { progressMs: 179000 });
+
+  assert.equal(ext.player.playing, true);
+});
+
+test('a pause in the middle of a track is somebody pressing pause, and is left alone', async (t) => {
+  const ext = connectExtension();
+  t.after(ext.dispose);
+
+  await stall(ext, { progressMs: 90000 });
+
+  assert.equal(ext.player.playing, false);
+  assert.equal(messagesOfType(ext, 'recovered').length, 0);
+});
+
+test('a pause at the start with no song change behind it is left alone', async (t) => {
+  const ext = connectExtension();
+  t.after(ext.dispose);
+
+  // No songchange fired, so this is a host pausing a track they just started.
+  await stall(ext, { progressMs: 0 });
+
+  assert.equal(ext.player.playing, false);
+  assert.equal(ext.player.nextCalls, 0);
+});
+
+test('nothing queued behind it is a queue that ended, not a stall', async (t) => {
+  const ext = connectExtension({ nextTracks: 0 });
+  t.after(ext.dispose);
+
+  await stall(ext, { progressMs: 179000 });
+
+  assert.equal(ext.player.playing, false);
+  assert.equal(ext.player.nextCalls, 0);
+});
+
+test('a client too wedged to recover is nudged twice and then let alone', async (t) => {
+  const ext = connectExtension({ nextRecovers: false });
+  t.after(ext.dispose);
+
+  ext.player.play = () => { ext.player.playing = false; };
+
+  for (let i = 0; i < 5; i++) await stall(ext, { progressMs: 179000 });
+
+  // Bounded per window: a fault that returns every track must not be nudged all night.
+  assert.equal(ext.player.nextCalls, 2);
+  assert.deepEqual(messagesOfType(ext, 'recovered').map((m) => m.how), ['failed', 'failed']);
+});
+
+test('the state report carries the playhead, which is what makes a stall knowable', async (t) => {
+  const ext = connectExtension({ progressMs: 1234, durationMs: 210000 });
+  t.after(ext.dispose);
+
+  fire(ext, 'songchange');
+
+  const state = messagesOfType(ext, 'state').at(-1);
+  assert.equal(state.progressMs, 1234);
+  assert.equal(state.durationMs, 210000);
+});
+
+test('a host that turns recovery off is honoured, and can turn it back on', async (t) => {
+  const ext = connectExtension();
+  t.after(ext.dispose);
+
+  ext.socket.receive(JSON.stringify({ type: 'configure', recoverStalls: false }));
+  await stall(ext, { progressMs: 179000 });
+
+  assert.equal(ext.player.playing, false);
+  assert.equal(messagesOfType(ext, 'recovered').length, 0);
+
+  ext.socket.receive(JSON.stringify({ type: 'configure', recoverStalls: true }));
+  await stall(ext, { progressMs: 179000 });
+
+  assert.equal(ext.player.playing, true);
+});
+
+test('configure is honoured before the player is ready, unlike every other message', async (t) => {
+  // throwsUntil keeps getVolume failing, which is how a real client looks while still waking.
+  const ext = loadExtension({ throwsUntil: 1000 });
+  t.after(ext.dispose);
+  ext.socket.open();
+
+  ext.socket.receive(JSON.stringify({ type: 'configure', recoverStalls: false }));
+
+  // A command that needs the player is refused with a diagnosis instead of being run.
+  ext.socket.receive(JSON.stringify({ type: 'volume', to: 0.2 }));
+  assert.equal(ext.player.setCalls.length, 0);
+
+  // Now let the player wake, then stall it: the setting sent while waking must still hold.
+  ext.player.getVolumeCalls = 1000;
+  await ext.clock.drain();
+  await stall(ext, { progressMs: 179000 });
+
+  assert.equal(messagesOfType(ext, 'recovered').length, 0);
+});
+
+// ── the regression surface: none of this may cost what already worked ───────────────
+
+test('a Spicetify without the playhead API still reports state, so fading keeps working', async (t) => {
+  const ext = connectExtension();
+  t.after(ext.dispose);
+
+  // An older client: the methods the stall detector needs are simply absent.
+  delete ext.player.getProgress;
+  delete ext.player.getDuration;
+
+  fire(ext, 'songchange');
+
+  const state = messagesOfType(ext, 'state').at(-1);
+  assert.equal(state.playing, false);
+  assert.equal(state.volume, 0.5);
+  assert.equal(state.progressMs, null);
+  assert.equal(state.durationMs, null);
+});
+
+test('a playhead that throws is survived rather than escaping the listener', async (t) => {
+  const ext = connectExtension();
+  t.after(ext.dispose);
+
+  ext.player.getProgress = () => { throw new TypeError('not ready'); };
+
+  fire(ext, 'onplaypause');
+
+  assert.equal(messagesOfType(ext, 'state').length > 0, true);
+  assert.equal(messagesOfType(ext, 'recovered').length, 0);
+});
+
+test('with no playhead there is nothing to detect, so nothing is ever nudged', async (t) => {
+  const ext = connectExtension();
+  t.after(ext.dispose);
+
+  delete ext.player.getProgress;
+  delete ext.player.getDuration;
+  ext.player.playing = false;
+  fire(ext, 'onplaypause');
+  await ext.clock.drain();
+
+  assert.equal(ext.player.nextCalls, 0);
+  assert.equal(messagesOfType(ext, 'recovered').length, 0);
+});
+
+test('a client with no next() reports the failure rather than throwing', async (t) => {
+  const ext = connectExtension();
+  t.after(ext.dispose);
+
+  ext.player.play = () => { ext.player.playing = false; };
+  delete ext.player.next;
+
+  await stall(ext, { progressMs: 179000 });
+
+  assert.deepEqual(messagesOfType(ext, 'recovered').map((m) => m.how), ['failed']);
+});
+
+test('the host pausing then starting through its backend leaves recovery armed', async (t) => {
+  const ext = connectExtension();
+  t.after(ext.dispose);
+
+  // StartAsync silences and starts Spotify through the backend, never playWithFadeIn, so the
+  // flag has to clear on playback being observed or recovery stays off for the rest of the night.
+  ext.socket.receive(JSON.stringify({ type: 'pauseWithFadeOut', ms: 16 }));
+  await ext.clock.drain();
+
+  ext.player.playing = true;
+  fire(ext, 'onplaypause');
+
+  await stall(ext, { progressMs: 179000 });
+
+  assert.equal(ext.player.playing, true);
+  assert.deepEqual(messagesOfType(ext, 'recovered').map((m) => m.how), ['play']);
 });

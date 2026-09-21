@@ -112,10 +112,19 @@ class FakeWebSocket {
 /// A real client's getVolume is a function on the player before the player can serve it, and
 /// throws until it can. `throwsUntil` reproduces that: the extension has to keep waiting rather
 /// than take defined for ready.
-export function loadExtension({ volume = 0.5, playing = false, port = null, throwsUntil = 0, platformKeys = 3 } = {}) {
+export function loadExtension({
+  volume = 0.5, playing = false, port = null, throwsUntil = 0, platformKeys = 3,
+  progressMs = 0, durationMs = 180000, nextTracks = 1, nextRecovers = true,
+} = {}) {
   const player = {
     volume,
     playing,
+    progressMs,
+    durationMs,
+    nextCalls: 0,
+    // Whether pressing next actually starts playing. False reproduces a client too wedged for
+    // the nudge to help, which the extension has to stop rather than keep poking.
+    nextRecovers,
     setCalls: [],
     getVolumeCalls: 0,
     getVolume() {
@@ -135,7 +144,23 @@ export function loadExtension({ volume = 0.5, playing = false, port = null, thro
     pause() {
       player.playing = false;
     },
-    data: { item: { metadata: { title: 'Track', artist_name: 'Artist' } } },
+    getProgress() {
+      return player.progressMs;
+    },
+    getDuration() {
+      return player.durationMs;
+    },
+    next() {
+      player.nextCalls++;
+      player.progressMs = 0;
+      if (player.nextRecovers) player.playing = true;
+    },
+    data: {
+      item: { metadata: { title: 'Track', artist_name: 'Artist' } },
+      // What Spotify has queued behind the current track. Empty is a queue that ended, or
+      // Autoplay off, and the extension must leave both alone.
+      nextTracks: Array.from({ length: nextTracks }, (_, i) => ({ uri: 'spotify:track:' + i })),
+    },
     listeners: {},
     addEventListener(name, fn) {
       player.listeners[name] = fn;
@@ -201,4 +226,13 @@ export function lastFaded(ext) {
 
 export function diagnoses(ext) {
   return ext.sentMessages.filter((m) => m.type === 'diagnosis');
+}
+
+/** Fires the player event the extension bound, the way the real client would. */
+export function fire(ext, name) {
+  ext.player.listeners[name]?.();
+}
+
+export function messagesOfType(ext, type) {
+  return ext.sentMessages.filter((m) => m.type === type);
 }

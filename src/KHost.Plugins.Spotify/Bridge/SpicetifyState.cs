@@ -5,7 +5,9 @@ namespace KHost.Plugins.Spotify.Bridge;
 
 /// <summary>What the extension reports from inside the client, read straight from the player
 /// rather than asked for, so it costs no process and arrives as it happens.</summary>
-public sealed record SpicetifyState(SpotifyPlayback Playback, string? Title, string? Artist, float Volume)
+public sealed record SpicetifyState(
+    SpotifyPlayback Playback, string? Title, string? Artist, float Volume,
+    int? ProgressMs = null, int? DurationMs = null)
 {
     public SpotifyState ToSpotifyState() => new(Playback, Title, Artist);
 
@@ -47,13 +49,38 @@ public sealed record SpicetifyState(SpotifyPlayback Playback, string? Title, str
                 playing ? SpotifyPlayback.Playing : SpotifyPlayback.Paused,
                 NullIfEmpty(Read(root, "title")),
                 NullIfEmpty(Read(root, "artist")),
-                root.TryGetProperty("volume", out var v) && v.TryGetSingle(out var volume) ? volume : 1f);
+                root.TryGetProperty("volume", out var v) && v.TryGetSingle(out var volume) ? volume : 1f,
+                ReadInt(root, "progressMs"),
+                ReadInt(root, "durationMs"));
         }
         catch (JsonException)
         {
             return null;
         }
     }
+
+    /// <summary>How a stall was recovered, for the log. Null when the message does not say.</summary>
+    public static string? HowRecovered(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                ? Read(document.RootElement, "how")
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Null rather than zero for a missing playhead: zero is a real position, and a
+    /// caller telling a stall from a pause must not read "not reported" as "at the start".</summary>
+    private static int? ReadInt(JsonElement root, string name)
+        => root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number
+            && value.TryGetInt32(out var number) ? number : null;
 
     private static string? Read(JsonElement root, string name)
         => root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String

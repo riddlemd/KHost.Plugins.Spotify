@@ -21,10 +21,13 @@ public sealed class SpicetifyBridge : IDisposable
     /// correlated by id: a newer fade supersedes an older one at the other end too.</summary>
     private TaskCompletionSource<bool>? _fading;
 
-    public SpicetifyBridge(ILogger logger, int port)
+    private readonly bool _recoverStalledPlayback;
+
+    public SpicetifyBridge(ILogger logger, int port, bool recoverStalledPlayback = true)
     {
         _logger = logger;
         _port = port;
+        _recoverStalledPlayback = recoverStalledPlayback;
     }
 
     /// <summary>Raised when the extension reports Spotify moved, so the provider need not poll.</summary>
@@ -182,6 +185,11 @@ public sealed class SpicetifyBridge : IDisposable
 
         try
         {
+            // Before the read loop: the extension ships defaulting to on, so a host who turned it
+            // off is only honoured once this lands, and every reconnect needs telling again.
+            await SendAsync(
+                new { type = "configure", recoverStalls = _recoverStalledPlayback }, cancellationToken);
+
             await ReadLoopAsync(stream, cancellationToken);
         }
         finally
@@ -222,6 +230,12 @@ public sealed class SpicetifyBridge : IDisposable
                 case "state" when SpicetifyState.Parse(received.Payload) is { } state:
                     LastState = state;
                     StateReceived?.Invoke(this, state);
+                    break;
+
+                case "recovered":
+                    _logger.LogWarning(
+                        "Spotify stalled at the end of a track; the extension recovered it ({How})",
+                        SpicetifyState.HowRecovered(received.Payload) ?? "unknown");
                     break;
 
                 case "diagnosis" when SpicetifyDiagnosis.Parse(received.Payload) is { } diagnosis:

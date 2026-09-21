@@ -88,6 +88,34 @@ public class BridgedSpotifyControllerTests : IDisposable
         Assert.Contains("state", _inner.Calls);
     }
 
+    /// <summary>The extension ships with recovery on, so a host who turned it off is only
+    /// honoured once this lands — and it has to land again on every reconnect, because a
+    /// restarted Spotify loads a fresh extension carrying the shipped default.</summary>
+    [Fact]
+    public async Task AttachingTellsTheExtensionWhetherToRecoverStalls()
+    {
+        await using var extension = await FakeExtension.ConnectAsync(_port);
+
+        var handshake = await extension.NextAsync();
+
+        Assert.Contains("\"type\":\"configure\"", handshake);
+        Assert.Contains("\"recoverStalls\":true", handshake);
+    }
+
+    /// <summary>The off case, which is the one the setting exists for. Asserting only the default
+    /// would pass against a handshake that hardcodes true and ignores the venue entirely.</summary>
+    [Fact]
+    public async Task AVenueThatTurnedRecoveryOff_IsWhatTheExtensionIsTold()
+    {
+        var port = FreePort();
+        using var bridge = new SpicetifyBridge(NullLogger.Instance, port, recoverStalledPlayback: false);
+        bridge.Start();
+
+        await using var extension = await FakeExtension.ConnectAsync(port);
+
+        Assert.Contains("\"recoverStalls\":false", await extension.NextAsync());
+    }
+
     // ── with an extension attached ─────────────────────────────────────────────────────
 
     [Fact]
@@ -527,6 +555,10 @@ public class BridgedSpotifyControllerTests : IDisposable
     private async Task<FakeExtension> AttachAsync()
     {
         var extension = await FakeExtension.ConnectAsync(_port);
+
+        // The handshake, absorbed here so NextAsync means "the next command" to every test below.
+        // It is part of attaching rather than something a caller asked for.
+        Assert.Contains("\"type\":\"configure\"", await extension.NextAsync());
 
         // Ready, not merely connected: the bridge reads the opening report on its own loop, so
         // commanding immediately races it, passing on a fast machine and falling back on a slow one.

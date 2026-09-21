@@ -102,6 +102,8 @@
       let ask;
       try { ask = JSON.parse(event.data); } catch (e) { return; }
 
+      if (ask.type === 'configure') return configure(ask);
+
       const run = COMMANDS[ask.type];
 
       // Anything unrecognised is dropped rather than answered: a newer plugin talking to an older
@@ -141,7 +143,123 @@
       title: meta.title || (track && track.name) || null,
       artist: meta.artist_name || null,
       volume: Spicetify.Player.getVolume(),
+      // Milliseconds. The host cannot tell a stall from a hand on the pause button without them.
+      progressMs: readPlayer('getProgress'),
+      durationMs: readPlayer('getDuration'),
     });
+  }
+
+  const number = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+  // Every player reading goes through this. These arrived later than the rest of the API, and a
+  // Spicetify without them must cost the stall recovery only: report() runs on every player event,
+  // so letting it throw would take the state the host fades on with it.
+  function readPlayer(method) {
+    try {
+      return number(Spicetify.Player[method]());
+    } catch (e) {
+      // Absent as well as throwing: calling undefined lands here too, which is the whole point.
+      return null;
+    }
+  }
+
+  // How close to the end counts as "the track ran out" rather than somebody pausing near it.
+  const STALL_END_MS = 2000;
+
+  // A track loaded but sitting at zero is the other face of the same bug.
+  const STALL_START_MS = 250;
+
+  // The nudge is a workaround for somebody else's bug, so it is bounded: past this it stops and
+  // lets the room fall silent rather than fighting whatever is really wrong.
+  const STALL_MAX_NUDGES = 2;
+  const STALL_WINDOW_MS = 60000;
+  const STALL_CONFIRM_MS = 1000;
+
+  // Set while the host's own pauseWithFadeOut is running, and left set until the host plays again:
+  // resuming a pause the host asked for is worse than the bug this recovers from.
+  let pausedByHost = false;
+
+  let nudges = [];
+  let songChangedAt = 0;
+
+  // The venue's answer, sent by the host on every attach. Defaults on to match the shipped
+  // setting, so an extension that attaches before being told behaves the way the box is ticked.
+  let recoverStalls = true;
+
+  // Spotify sometimes ends a track without starting the next: playback stops outright, or the next
+  // loads and sits at 0:00. Both look the same from here — paused, nobody asked, and the playhead
+  // at one end of the track or the other.
+  function looksLikeAStall(progressMs, durationMs, sinceSongChangeMs) {
+    if (!recoverStalls || pausedByHost) return false;
+    if (typeof progressMs !== 'number' || typeof durationMs !== 'number' || durationMs <= 0) return false;
+
+    if (durationMs - progressMs <= STALL_END_MS) return true;
+
+    // Only just after a track change: a host who pauses a track they have just started is at the
+    // beginning of it too, and that is theirs to do.
+    return progressMs <= STALL_START_MS && sinceSongChangeMs <= STALL_CONFIRM_MS;
+  }
+
+  // Bounded per window rather than per track: a fault that returns every time would otherwise be
+  // nudged all night, and the log would say it recovered each time.
+  function mayNudge(now) {
+    nudges = nudges.filter((at) => now - at < STALL_WINDOW_MS);
+
+    return nudges.length < STALL_MAX_NUDGES;
+  }
+
+  // Nothing queued behind it is a queue that ended, or Autoplay off, and both are correct
+  // behaviour. Unknown counts as nothing: guessing wrong here restarts music a room turned off.
+  function hasSomethingNext() {
+    const data = Spicetify.Player.data || {};
+    const next = data.nextTracks || (data.queue && data.queue.nextTracks);
+
+    return Array.isArray(next) && next.length > 0;
+  }
+
+  async function recoverFromStall() {
+    const now = Date.now();
+
+    if (!mayNudge(now) || !hasSomethingNext()) return;
+
+    nudges.push(now);
+
+    // Play first: it is the lighter of the two, and for the sits-at-0:00 face of the bug it is
+    // the whole fix. Skipping straight to next would lose a track nobody has heard.
+    Spicetify.Player.play();
+
+    await new Promise((r) => setTimeout(r, STALL_CONFIRM_MS));
+
+    if (Spicetify.Player.isPlaying()) return send({ type: 'recovered', how: 'play' });
+
+    if (typeof Spicetify.Player.next !== 'function') return send({ type: 'recovered', how: 'failed' });
+
+    Spicetify.Player.next();
+
+    await new Promise((r) => setTimeout(r, STALL_CONFIRM_MS));
+
+    send({ type: 'recovered', how: Spicetify.Player.isPlaying() ? 'next' : 'failed' });
+  }
+
+  function onPlayPause() {
+    report();
+
+    if (Spicetify.Player.isPlaying()) {
+      // Whatever started it — a fade in, the host's backend, or a hand on the keyboard — the
+      // room is playing again and the host's pause is over.
+      pausedByHost = false;
+
+      return;
+    }
+
+    if (looksLikeAStall(readPlayer('getProgress'), readPlayer('getDuration'), Date.now() - songChangedAt)) {
+      recoverFromStall();
+    }
+  }
+
+  function onSongChange() {
+    songChangedAt = Date.now();
+    report();
   }
 
   // A newer fade supersedes an older one rather than fighting it: two ramps setting the volume in
@@ -202,6 +320,11 @@
 
   // Faded out and paused as one act.
   async function pauseWithFadeOut(ms) {
+    // Set before the fade, not after it: the host has asked to stop as of now, and a track that
+    // ends during a five second fade would otherwise read as a stall and be nudged back to life
+    // over the top of it.
+    pausedByHost = true;
+
     // Nothing after this point if a newer command took over: pausing would stop the playback it
     // never asked to interrupt, while claiming the room had reached silence.
     if (!await fadeOut(ms)) return;
@@ -218,6 +341,7 @@
     noteHostLevel();
 
     write(0);
+    pausedByHost = false;
 
     if (!Spicetify.Player.isPlaying()) Spicetify.Player.play();
 
@@ -236,14 +360,20 @@
     volume: (ask) => { const to = level(ask.to); if (to !== null) setLevel(to); },
   });
 
+  // Outside COMMANDS, because that table is gated on the player being ready and this touches no
+  // player: a host who turned recovery off must be honoured even while the client is still waking.
+  function configure(ask) {
+    if (typeof ask.recoverStalls === 'boolean') recoverStalls = ask.recoverStalls;
+  }
+
   // Attaches the half of this that needs a working player. Runs once, whenever the player turns
   // up, which may be before the socket, after it, or never.
   function startDriving(volume) {
     ready = true;
     previous = ours = volume;
 
-    Spicetify.Player.addEventListener('onplaypause', report);
-    Spicetify.Player.addEventListener('songchange', report);
+    Spicetify.Player.addEventListener('onplaypause', onPlayPause);
+    Spicetify.Player.addEventListener('songchange', onSongChange);
 
     sendDiagnosis();
     report();
