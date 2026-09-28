@@ -157,8 +157,21 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
     public Task PauseAsync(CancellationToken cancellationToken = default)
         => _controller.PauseAsync(cancellationToken);
 
-    public Task ResumeAsync(CancellationToken cancellationToken = default)
-        => _controller.ResumeAsync(cancellationToken);
+    /// <summary>Starts the playlist instead when Spotify has no track: a freshly launched client
+    /// reports itself paused with nothing loaded, and accepts a resume that then plays nothing.</summary>
+    public async Task ResumeAsync(CancellationToken cancellationToken = default)
+    {
+        var state = await _controller.GetStateAsync(cancellationToken);
+
+        // Unreadable is not empty: a backend that cannot see still has only the resume to try.
+        if (state is not null && string.IsNullOrWhiteSpace(state.Title))
+        {
+            await StartAsync(cancellationToken);
+            return;
+        }
+
+        await _controller.ResumeAsync(cancellationToken);
+    }
 
     /// <summary><paramref name="fadeDuration"/> is ignored. Ramping Spotify's own volume is the
     /// host's setting to keep, and each step was a process spawn that blocked the console.</summary>
