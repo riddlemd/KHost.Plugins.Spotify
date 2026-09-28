@@ -5,8 +5,10 @@ using System.Runtime.Versioning;
 
 namespace KHost.Plugins.Spotify.Control;
 
-/// <summary>Drives Spotify with the keyboard's media keys, reading nothing back from the app.</summary>
-/// <remarks>Only one toggle exists; <see cref="GetStateAsync"/> decides which way it lands.</remarks>
+/// <summary>Drives Spotify through its own row on the system media transport, falling back to the
+/// keyboard's media keys only while Spotify has no row.</summary>
+/// <remarks>A media key lands on whichever app owns media focus, so it is the last resort: KHost's
+/// own screen or a browser tab takes focus the moment it plays anything.</remarks>
 [SupportedOSPlatform("windows")]
 public sealed class WindowsSpotifyController : ISpotifyController
 {
@@ -38,8 +40,9 @@ public sealed class WindowsSpotifyController : ISpotifyController
     public event EventHandler? PlaybackChanged;
 
     public string? Limitation =>
-        "On Windows the media keys reach whichever app currently owns media focus, which is "
-        + "Spotify only while nothing else is playing.";
+        "On Windows Spotify is controlled through its media session, which appears once it has "
+        + "played something. Until then the media keys are used, and they reach whichever app "
+        + "currently owns media focus.";
 
     public async Task<bool> StartAsync(string? contextUri, bool shuffle, CancellationToken cancellationToken = default)
     {
@@ -88,16 +91,10 @@ public sealed class WindowsSpotifyController : ISpotifyController
         => ToggleToAsync(SpotifyPlayback.Playing, cancellationToken);
 
     public Task StopAsync(CancellationToken cancellationToken = default)
-    {
-        Send(MediaStop);
-        return Task.CompletedTask;
-    }
+        => CommandAsync(SessionCommand.Stop, MediaStop, cancellationToken);
 
     public Task SkipAsync(CancellationToken cancellationToken = default)
-    {
-        Send(MediaNextTrack);
-        return Task.CompletedTask;
-    }
+        => CommandAsync(SessionCommand.Next, MediaNextTrack, cancellationToken);
 
     /// <summary>Decides whether the one key Windows offers would land the right way up. Unknown
     /// state sends it: a backend that cannot see is no worse off than doing nothing.</summary>
@@ -117,10 +114,36 @@ public sealed class WindowsSpotifyController : ISpotifyController
     {
         var state = await GetStateAsync(cancellationToken);
 
-        if (ShouldSendToggle(state, target))
-            Send(MediaPlayPause);
-        else
-            _logger.LogDebug("Spotify is already {Target}; leaving the media key alone", target);
+        if (!ShouldSendToggle(state, target))
+        {
+            _logger.LogDebug("Spotify is already {Target}; leaving it alone", target);
+            return;
+        }
+
+        await CommandAsync(
+            target == SpotifyPlayback.Playing ? SessionCommand.Play : SessionCommand.Pause,
+            MediaPlayPause,
+            cancellationToken);
+    }
+
+    private enum SessionCommand { Play, Pause, Stop, Next }
+
+    /// <summary>Sends the command to Spotify's session; the key goes out only when there is none,
+    /// since a refusal from the session means Spotify itself declined and the key would reach it
+    /// too — or, worse, whatever else holds media focus.</summary>
+    private async Task CommandAsync(SessionCommand command, byte fallbackKey, CancellationToken cancellationToken)
+    {
+        var accepted = await TrySessionCommandAsync(command, cancellationToken);
+
+        if (accepted is null)
+        {
+            _logger.LogDebug("Spotify has no media session yet; sending the media key for {Command}", command);
+            Send(fallbackKey);
+        }
+        else if (accepted == false)
+        {
+            _logger.LogInformation("Spotify declined {Command}; it may have nothing loaded to play", command);
+        }
     }
 
 #if WINDOWS_MEDIA_SESSION
@@ -225,7 +248,41 @@ public sealed class WindowsSpotifyController : ISpotifyController
             return null;
         }
     }
+
+    /// <summary>True or false for Spotify's own answer; null when it has no session to ask.</summary>
+    private async Task<bool?> TrySessionCommandAsync(SessionCommand command, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var manager = await Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager
+                .RequestAsync().AsTask(cancellationToken);
+
+            var session = manager.GetSessions()
+                .FirstOrDefault(s => string.Equals(s.SourceAppUserModelId, SessionAppId, StringComparison.OrdinalIgnoreCase));
+
+            if (session is null)
+                return null;
+
+            var operation = command switch
+            {
+                SessionCommand.Play => session.TryPlayAsync(),
+                SessionCommand.Pause => session.TryPauseAsync(),
+                SessionCommand.Stop => session.TryStopAsync(),
+                _ => session.TrySkipNextAsync(),
+            };
+
+            return await operation.AsTask(cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "Could not reach Spotify's media session");
+            return null;
+        }
+    }
 #else
+    private Task<bool?> TrySessionCommandAsync(SessionCommand command, CancellationToken cancellationToken)
+        => Task.FromResult<bool?>(null);
+
     /// <summary>Built without the Windows media session projection, so nothing can be read back.</summary>
     public Task<SpotifyState?> GetStateAsync(CancellationToken cancellationToken = default)
         => Task.FromResult<SpotifyState?>(null);
