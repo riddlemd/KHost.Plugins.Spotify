@@ -1,7 +1,7 @@
 # KHost.Plugins.Spotify
 
-Break-music provider for [KHost](../KHost). Puts the Spotify desktop app on between singers, and
-takes it off again when one starts.
+Break-music provider for [KHost](https://github.com/riddlemd/KHost). Puts the Spotify desktop app on
+between singers, and takes it off again when one starts.
 
 This plugin **drives Spotify; it does not carry its audio**. The sound comes out of Spotify's own
 output, where the host cannot route it, mix it, or send it to a Cast device — so
@@ -10,92 +10,126 @@ everything goes through the app already running on the machine.
 
 ## What it does, and what it deliberately does not
 
-It sends five commands and no more: start, pause, resume, stop and skip. **Nothing is ever read
-back out of Spotify**, and **nothing sets its volume.**
+It sends five commands and no more: start, pause, resume, stop and skip. It **reads Spotify's
+state back** — playing or paused, and the track — so the console names what is on, and a host who
+put Spotify on themselves before the first singer is left alone rather than restarted. On macOS and
+Windows it is also told when Spotify moves by itself (a track ends, or someone presses pause in
+Spotify's window); Linux has no watch yet, so the host asks.
 
-Two visible consequences. The console shows break music as playing but does not name the track —
-Spotify's own window is where a host sees what is on. And the venue volume does not reach Spotify:
-its level is set in Spotify, by whoever is running the room. KHost asks every provider it cannot
-mix to take the venue level, and this one declines rather than move a slider out from under them.
+**Nothing sets Spotify's volume.** Its level is set in Spotify, by whoever is running the room. KHost
+asks every provider it cannot mix to take the venue level, and this one declines rather than move a
+slider out from under them.
 
-That also means **the suspend fade is ignored**. KHost asks for a two second fade before it loads
-a song, and waits on it. Fading here would mean ramping Spotify's volume a step at a time, each
-step its own process — which measured nearly five seconds of dead air with the singer stood
-there. Spotify is stopped at once instead.
+Resume starts the playlist instead when Spotify has **no track loaded**. A freshly launched Spotify
+reports itself paused with nothing to resume, and accepts a resume that then plays nothing.
+
+## Fading, and the Spicetify bridge
+
+KHost asks for a two second fade before it loads a song, and waits on it. This plugin ignores that
+fade: ramping Spotify's volume from outside meant a process per step, which measured nearly five
+seconds of dead air with the singer stood there.
+
+Fading comes instead from a small [Spicetify](https://spicetify.app) extension,
+`extension/khost-bridge.js`, which ships in the plugin's zip and talks to it over a loopback socket.
+With it, pause, resume and stop fade over the plugin's own fade length. Without it break music still
+plays, but it starts and stops at full level, and the Plugins page says so.
+
+Setup is automatic once Spicetify itself is installed: at startup the plugin copies the extension in
+and applies it. Applying restarts Spotify, so it is only ever done while Spotify is **not playing**;
+otherwise the Plugins page asks for Spotify to be closed and KHost restarted. If the extension goes
+missing or will not attach, the Plugins page names the fix (usually `spicetify backup apply`).
+
+The extension can also nudge Spotify when it finishes a track without starting the next, a stall
+Spotify is prone to.
 
 ## Settings
 
-| Setting | Default | |
-|---|---|---|
-| Playlist | blank | A Spotify link or URI. Blank resumes whatever Spotify already has loaded. |
-| Shuffle | on | |
-| Launch Spotify if it is not already running | on | |
+| Section | Setting | Default | |
+|---|---|---|---|
+| Break music | Playlist | blank | A Spotify link or URI. Blank resumes whatever Spotify already has loaded. |
+| Break music | Shuffle the playlist | on | Left to Spotify's own setting on Windows. |
+| Break music | Launch Spotify if it is not already running | on | |
+| Spicetify bridge | Listen for the KHost Spicetify extension | on | Off means no fading, and no setup. |
+| Spicetify bridge | Port the extension connects on | 8974 | Loopback only. |
+| Spicetify bridge | Fade length in milliseconds | 1500 | 0 turns fading off. |
+| Bug fixes | Nudge Spotify when it ends a track without starting the next | on | Needs the extension. |
 
 The Playlist field takes what "Copy link to playlist" puts on the clipboard
 (`https://open.spotify.com/playlist/…?si=…`) as well as the `spotify:playlist:…` form; the `si`
-share token is dropped. Albums and artists work too. A **single track is refused** — a bed that
-ends after one song is not a bed, and nothing here reads Spotify back to notice that it stopped.
-Anything else is refused with a warning on the Plugins page, and the bed falls back to resuming
-whatever Spotify has loaded.
+share token is dropped. Albums, artists and `spotify:collection:…` links work too. A **single track
+is refused** — a bed that ends after one song is not a bed. Anything else is refused with a warning
+on the Plugins page, and the bed falls back to resuming whatever Spotify has loaded.
 
 ## Platforms
 
 | | macOS | Windows | Linux |
 |---|---|---|---|
-| Backend | AppleScript | media keys | MPRIS over `gdbus` |
-| Start / pause / resume / stop | yes | toggle-based, see below | yes |
+| Backend | AppleScript | Spotify's media session (media keys as fallback) | MPRIS over `gdbus` |
+| Start / pause / resume / stop | yes | yes | yes |
 | Skip | yes | yes | yes |
-| Choose the playlist | yes | via the `spotify:` URI | yes |
+| Reads state and track back | yes | yes | yes |
+| Told when Spotify moves by itself | yes | yes | no, asked |
+| Choose the playlist | yes | via the `spotify:` URI, see below | yes |
 | Shuffle | yes | left to Spotify's own setting | yes |
+| Release zip | portable | `-win` | portable |
 
-**macOS** is the only backend with a complete surface. Spotify.app ships an AppleScript dictionary
-with discrete `play`, `pause` and `next track` commands, so every command lands exactly and
-nothing has to track what Spotify is currently doing. Every script is wrapped in an
-`if application "Spotify" is running` guard,
-because naming an app inside a `tell` block launches it — an unguarded pause would start Spotify
-in order to pause it.
+**macOS** — Spotify.app ships an AppleScript dictionary with discrete `play`, `pause` and
+`next track` commands, so every command lands exactly. Every script is wrapped in an
+`if application "Spotify" is running` guard, because naming an app inside a `tell` block launches it
+— an unguarded pause would start Spotify in order to pause it.
 
 macOS will ask once for permission to control Spotify (**System Settings → Privacy & Security →
 Automation**). Until that is granted every command fails with Apple event error `-1743`, which the
 log calls out by name. In development the permission attaches to whatever binary is running KHost,
 so it is re-asked after switching between `dotnet run` and a published build.
 
-**Windows** has no scripting interface, only the global media keys. Two things follow. The keys go
-to whichever app owns media focus — normally Spotify, but not guaranteed on a machine running
-another player. And Windows exposes a play/pause **toggle** with no discrete play or pause, so the
-backend tracks what it last commanded in order to know whether pressing it would land the right
-way up; a host who pauses in Spotify's own window puts that record out of step until the next
-start.
+**Windows** has no scripting interface, so the plugin drives Spotify's own row on the system media
+transport (`Windows.Media.Control`) — the same one the volume flyout shows — with discrete play,
+pause, stop and next, and reads the state and track from it. Picking Spotify's row by its app id
+means another player holding media focus does not get in the way. That row appears only once
+Spotify has played something; until then the global media keys are the fallback, and they reach
+whichever app owns media focus. This is the one limitation the Plugins page states for Windows.
+
+Loading a playlist on Windows means opening its `spotify:` URI. That shows the playlist in Spotify,
+but whether playback moves to it is Spotify's call: with a track already loaded, Spotify has been
+seen to resume that track instead.
+
+The media session needs the WinRT projection, which the host does not carry, so the Windows build
+ships as its own `-win` zip with `Microsoft.Windows.SDK.NET.dll` and `WinRT.Runtime.dll` beside the
+plugin. The portable zip still loads on Windows, but drives Spotify by media keys alone and reads
+nothing back.
 
 **Linux** talks MPRIS, which is a good fit — discrete `Play`, `Pause`, `Stop`, `Next` and an
 `OpenUri` for the playlist. `gdbus` is shelled out to rather than taking a D-Bus client
 dependency, since a plugin's dependencies get copied into the host's plugin folder and glib ships
 `gdbus` on any desktop that has Spotify.
 
-The Plugins page states each backend's limitation once at startup; macOS and Linux have none to
-state.
+The Plugins page states a backend's limitation once at startup; macOS and Linux have none to state.
 
 ## Building
 
-Requires a sibling checkout of the KHost repo (the plugin compiles against `KHost.Plugins.Sdk` by
-project reference until the Sdk ships as a NuGet package):
-
-```
-~/Developer/riddlemd/
-  KHost/
-  KHost.Plugins.Spotify/
-```
+The plugin builds against the published contracts, `KHost.Abstractions` and `KHost.Common` 0.30.0,
+as NuGet packages. Until they are on nuget.org they come from the local feed KHost's
+`./build/pack-contracts.sh` fills (see KHost's AGENTS.md, **The published contracts**).
 
 ```bash
-dotnet build KHost.Plugins.Spotify.slnx
+dotnet build src/KHost.Plugins.Spotify
 dotnet test tests/KHost.Plugins.Spotify.Tests
 ```
 
-Building also drops the plugin into the sibling KHost checkout's runtime plugins folder
-(`src/KHost.UserInterface/bin/Debug/net10.0/plugins/khost.spotify/`) when it exists.
+It targets `net10.0` and `net10.0-windows10.0.19041.0`; the second exists only for the Windows media
+session. Building also drops the plugin into a sibling KHost checkout's runtime plugins folder
+(`../KHost/src/KHost.UserInterface/bin/Debug/net10.0/plugins/khost.spotify/`) when it exists. The
+folder is emptied first, and only one target goes in: the Windows one on Windows, the portable one
+elsewhere.
 
 ## Installing
 
-Copy the build output (entry dll, `manifest.json`, and dependency dlls) into a folder under
-KHost's `plugins/` directory, enable it on KHost's Plugins settings page, and restart KHost. Then
-pick **Spotify** as the venue's break-music provider.
+From a KHost host: **Plugins → Available**, once the release is in the plugin catalog. The catalog
+offers the `-win` zip on Windows and the portable one elsewhere.
+
+By hand: unzip the release that matches the machine into its own folder under KHost's `plugins/`
+directory, enable it on KHost's Plugins page, and restart KHost. The zip carries `manifest.json`,
+the entry dll, its `.deps.json` and `extension/khost-bridge.js` (plus the two WinRT dlls in the
+`-win` zip), and never a copy of the KHost contract assemblies. Then pick **Spotify** as the venue's
+break-music mode.
