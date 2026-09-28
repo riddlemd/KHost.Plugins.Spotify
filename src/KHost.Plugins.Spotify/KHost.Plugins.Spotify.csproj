@@ -34,12 +34,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Sibling checkout of the KHost repo; swap for NuGet packages once published. Both are MIT,
-         so referencing them puts no PolyForm code in what this plugin redistributes. -->
     <!-- The published contracts, not a sibling checkout: this repo used to fail to build whenever
          the KHost checkout beside it changed branch, and an outside author has no such checkout at
          all. The package's own targets keep them out of this project's output, so nothing
-         downstream loses them. -->
+         downstream loses them. Both are MIT, so no PolyForm code reaches what this redistributes. -->
     <PackageReference Include="KHost.Abstractions" Version="0.30.0" />
     <PackageReference Include="KHost.Common" Version="0.30.0" />
 
