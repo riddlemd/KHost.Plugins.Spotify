@@ -190,7 +190,15 @@ public sealed class SpicetifyInstallation
         foreach (var directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             yield return directory;
 
-        // The installer's own location, which a shell that never re-read its profile will not have.
+        // The installer's own locations, which a shell that never re-read its profile will not have.
+        if (OperatingSystem.IsWindows())
+        {
+            var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+            if (!string.IsNullOrEmpty(localAppData))
+                yield return Path.Combine(localAppData, "spicetify");
+        }
+
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
         if (!string.IsNullOrEmpty(home))

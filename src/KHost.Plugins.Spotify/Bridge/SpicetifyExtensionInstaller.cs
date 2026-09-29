@@ -28,9 +28,13 @@ public sealed class SpicetifyExtensionInstaller(
     /// actually patched: an update reverts the patch and leaves both of those true. A caller that
     /// has watched for the extension and seen it never attach knows better than the check does.
     /// </param>
+    /// <param name="restartSpotify">
+    /// False patches the files and leaves Spotify running: the room keeps its music, and the
+    /// extension loads the next time Spotify starts, which is then somebody else's call.
+    /// </param>
     public async Task<SpicetifyInstallOutcome> EnsureInstalledAsync(
         SpicetifyInstallation installation, string sourcePath, string cliPath,
-        bool force = false, CancellationToken cancellationToken = default)
+        bool force = false, bool restartSpotify = true, CancellationToken cancellationToken = default)
     {
         if (!force && installation.IsExtensionCurrent(sourcePath))
             return SpicetifyInstallOutcome.AlreadyCurrent;
@@ -46,12 +50,14 @@ public sealed class SpicetifyExtensionInstaller(
             if (!configured.Succeeded)
                 return Failed("registering the extension", configured.Message);
 
-            var applied = await run(cliPath, ["apply"], cancellationToken);
+            string[] noRestart = restartSpotify ? [] : ["--no-restart"];
+
+            var applied = await run(cliPath, ["apply", .. noRestart], cancellationToken);
 
             // Checked on the disk, not the exit code: `apply` returns zero even when it patched
             // nothing, and `backup apply` is the heavier call that actually works on this Spotify.
             if (!applied.Succeeded || !installation.IsSpotifyPatched())
-                applied = await run(cliPath, ["backup", "apply"], cancellationToken);
+                applied = await run(cliPath, ["backup", "apply", .. noRestart], cancellationToken);
 
             if (!applied.Succeeded)
                 return Failed("applying the change to Spotify", applied.Message);
@@ -66,7 +72,10 @@ public sealed class SpicetifyExtensionInstaller(
                     + "Spicetify older than the installed Spotify is the usual reason.");
             }
 
-            logger.LogInformation("Installed the KHost bridge extension into Spicetify; Spotify was restarted to pick it up");
+            if (restartSpotify)
+                logger.LogInformation("Installed the KHost bridge extension into Spicetify; Spotify was restarted to pick it up");
+            else
+                logger.LogInformation("Installed the KHost bridge extension into Spicetify; it loads the next time Spotify starts");
 
             return SpicetifyInstallOutcome.Installed;
         }

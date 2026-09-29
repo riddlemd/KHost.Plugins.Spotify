@@ -68,6 +68,8 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
             }
             else
             {
+                logger.LogInformation("Spicetify was not found on PATH or where its installer puts it, so break music will not fade");
+
                 context.ReportWarning(
                     "Break music fades in and out only on a machine with Spicetify installed — it is "
                     + "what lets KHost reach Spotify's own volume. Without it break music still plays, "
