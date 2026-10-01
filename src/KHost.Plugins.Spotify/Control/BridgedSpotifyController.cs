@@ -1,3 +1,5 @@
+using KHost.Abstractions.Models;
+using KHost.Abstractions.Services;
 using KHost.Plugins.Spotify.Bridge;
 
 namespace KHost.Plugins.Spotify.Control;
@@ -9,6 +11,7 @@ public sealed class BridgedSpotifyController : ISpotifyController
     private readonly ISpotifyController _inner;
     private readonly SpicetifyBridge _bridge;
     private readonly TimeSpan _fade;
+    private readonly IFlashService? _flash;
 
     /// <summary>Anything at or under this is silence. Loose, since Spotify rounds what it reports.</summary>
     private const float Silence = 0.005f;
@@ -17,11 +20,17 @@ public sealed class BridgedSpotifyController : ISpotifyController
     /// reports: a host who moved the volume in Spotify's own window told nobody here.</summary>
     private volatile bool _silenced;
 
-    public BridgedSpotifyController(ISpotifyController inner, SpicetifyBridge bridge, TimeSpan fade)
+    /// <summary>Once per cause: told once that this start will not fade, not again on every
+    /// later start while the extension stays unattached.</summary>
+    private bool _notReadyFlashed;
+
+    public BridgedSpotifyController(
+        ISpotifyController inner, SpicetifyBridge bridge, TimeSpan fade, IFlashService? flash = null)
     {
         _inner = inner;
         _bridge = bridge;
         _fade = fade;
+        _flash = flash;
 
         _bridge.StateReceived += (_, state) =>
         {
@@ -82,6 +91,19 @@ public sealed class BridgedSpotifyController : ISpotifyController
 
         if (silenced && await _bridge.RestoreAsync(_fade, cancellationToken))
             _silenced = false;
+
+        if (_bridge.IsReady)
+        {
+            _notReadyFlashed = false;
+        }
+        else if (!_notReadyFlashed)
+        {
+            _notReadyFlashed = true;
+            _flash?.Show(
+                "Spotify: break music will start and stop at full volume — the Spicetify bridge isn't "
+                + "connected.",
+                FlashType.Warning);
+        }
 
         return true;
     }

@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using KHost.Abstractions.Models;
+using KHost.Abstractions.Services;
 using KHost.Plugins.Spotify.Bridge;
 using KHost.Plugins.Spotify.Control;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -14,6 +16,7 @@ public class BridgedSpotifyControllerTests : IDisposable
     private readonly FakeSpotifyController _inner = new();
     private readonly SpicetifyBridge _bridge;
     private readonly int _port;
+    private readonly IFlashService _flash = Substitute.For<IFlashService>();
     private readonly BridgedSpotifyController _controller;
 
     public BridgedSpotifyControllerTests()
@@ -22,7 +25,7 @@ public class BridgedSpotifyControllerTests : IDisposable
         _bridge = new SpicetifyBridge(NullLogger.Instance, _port);
         _bridge.Start();
 
-        _controller = new BridgedSpotifyController(_inner, _bridge, TimeSpan.FromMilliseconds(40));
+        _controller = new BridgedSpotifyController(_inner, _bridge, TimeSpan.FromMilliseconds(40), _flash);
     }
 
     // ── with nothing attached, which is the ordinary case ──────────────────────────────
@@ -37,6 +40,28 @@ public class BridgedSpotifyControllerTests : IDisposable
         await _controller.StopAsync();
 
         Assert.Equal(["start", "pause", "resume", "skip", "stop"], _inner.Calls.Where(c => c != "state"));
+    }
+
+    [Fact]
+    public async Task WithNoExtension_StartingFlashesThatFadesAreOffOnce()
+    {
+        await _controller.StartAsync(null, shuffle: false);
+        await _controller.StartAsync(null, shuffle: false);
+
+        _flash.Received(1).Show(
+            Arg.Is<string>(text => text.StartsWith("Spotify:")), FlashType.Warning);
+    }
+
+    [Fact]
+    public async Task WithNoExtension_AStartTheBackendRefuses_DoesNotFlashAboutFading()
+    {
+        _inner.CanStart = false;
+
+        await _controller.StartAsync(null, shuffle: false);
+
+        // A start that never happened has nothing to fade; the failure itself is the backend's
+        // own concern, not this decorator's.
+        _flash.DidNotReceiveWithAnyArgs().Show(default!, default);
     }
 
     /// <summary>This class declares its own PlaybackChanged, so the backend's watch must be
@@ -246,6 +271,23 @@ public class BridgedSpotifyControllerTests : IDisposable
         Assert.Contains("\"ms\":40", coming);
 
         await starting;
+    }
+
+    [Fact]
+    public async Task AnAttachedExtension_StartingDoesNotFlashAboutFading()
+    {
+        await using var extension = await AttachAsync();
+
+        var starting = _controller.StartAsync(null, shuffle: false);
+
+        await extension.NextAsync();
+        await extension.SendAsync("""{"type":"faded","to":0}""");
+        await extension.NextAsync();
+        await extension.SendAsync("""{"type":"faded","to":0.4}""");
+
+        await starting;
+
+        _flash.DidNotReceiveWithAnyArgs().Show(default!, default);
     }
 
     [Fact]

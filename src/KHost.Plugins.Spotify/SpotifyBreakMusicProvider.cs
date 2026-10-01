@@ -1,3 +1,4 @@
+using KHost.Abstractions.Exceptions;
 using KHost.Abstractions.Messaging;
 using KHost.Abstractions.Messaging.Messages;
 using KHost.Abstractions.Models;
@@ -25,8 +26,9 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
     private readonly bool _shuffle;
 
     public SpotifyBreakMusicProvider(
-        ILogger<SpotifyBreakMusicProvider> logger, IPluginContext context, IMessageBroker broker)
-        : this(logger, context, controller: null, broker)
+        ILogger<SpotifyBreakMusicProvider> logger, IPluginContext context, IMessageBroker broker,
+        IFlashService flash)
+        : this(logger, context, controller: null, broker, flash)
     {
     }
 
@@ -34,7 +36,8 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
         ILogger<SpotifyBreakMusicProvider> logger,
         IPluginContext context,
         ISpotifyController? controller,
-        IMessageBroker? broker = null)
+        IMessageBroker? broker = null,
+        IFlashService? flash = null)
     {
         _logger = logger;
         _broker = broker;
@@ -53,7 +56,7 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
             _bridge.Start();
 
             platform = new BridgedSpotifyController(
-                platform, _bridge, TimeSpan.FromMilliseconds(Math.Max(0, settings.FadeMilliseconds)));
+                platform, _bridge, TimeSpan.FromMilliseconds(Math.Max(0, settings.FadeMilliseconds)), flash);
 
             if (SpicetifyInstallation.FindCli() is { } cli)
             {
@@ -140,7 +143,15 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
         }
 
         if (!await _controller.StartAsync(_contextUri, _shuffle, cancellationToken))
-            return false;
+        {
+            _logger.LogWarning("Spotify refused to start break music");
+
+            throw new KHostException(
+                "Spotify: couldn't start break music. Check that Spotify is installed and reachable, "
+                + "then try again.",
+                "Check that Spotify is installed and reachable, then try again.",
+                "KH-SPOTIFY-START-FAILED");
+        }
 
         CurrentTrack = ToTrack(await _controller.GetStateAsync(cancellationToken));
 
