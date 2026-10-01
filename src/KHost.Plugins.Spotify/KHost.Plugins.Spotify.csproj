@@ -7,7 +7,7 @@
     <TargetFrameworks>net10.0;net10.0-windows10.0.19041.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <Version>1.0.3</Version>
+    <Version>1.0.4</Version>
   </PropertyGroup>
 
   <!-- The Windows target needs its reference pack resolved explicitly off Windows, or the whole
@@ -34,12 +34,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Sibling checkout of the KHost repo; swap for NuGet packages once published. Both are MIT,
-         so referencing them puts no PolyForm code in what this plugin redistributes. -->
     <!-- The published contracts, not a sibling checkout: this repo used to fail to build whenever
          the KHost checkout beside it changed branch, and an outside author has no such checkout at
          all. The package's own targets keep them out of this project's output, so nothing
-         downstream loses them. -->
+         downstream loses them. Both are MIT, so no PolyForm code reaches what this redistributes. -->
     <PackageReference Include="KHost.Abstractions" Version="0.30.0" />
     <PackageReference Include="KHost.Common" Version="0.30.0" />
 

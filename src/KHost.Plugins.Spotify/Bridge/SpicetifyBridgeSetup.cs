@@ -4,7 +4,8 @@ using Microsoft.Extensions.Logging;
 namespace KHost.Plugins.Spotify.Bridge;
 
 /// <summary>Gets the bridge extension into Spotify, and reports when it will not go.</summary>
-/// <remarks>Applying restarts Spotify, so this only ever patches while the room isn't listening.</remarks>
+/// <remarks>Applying restarts Spotify, so that happens only while the room isn't listening; while
+/// it is, the files are patched in place and the host is asked to restart Spotify.</remarks>
 internal sealed class SpicetifyBridgeSetup
 {
     /// <summary>Grace before a missing extension counts as an answer; applying restarts Spotify.</summary>
@@ -23,7 +24,7 @@ internal sealed class SpicetifyBridgeSetup
     private readonly Func<SpicetifyDiagnosis?> _diagnose;
     private readonly Func<Task<bool>> _isSpotifyPlaying;
     private readonly Func<SpicetifyInstallation?> _discover;
-    private readonly Func<SpicetifyInstallation, bool, Task<SpicetifyInstallOutcome>> _install;
+    private readonly Func<SpicetifyInstallation, bool, bool, Task<SpicetifyInstallOutcome>> _install;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
 
     internal SpicetifyBridgeSetup(
@@ -33,7 +34,7 @@ internal sealed class SpicetifyBridgeSetup
         Func<SpicetifyDiagnosis?> diagnose,
         Func<Task<bool>> isSpotifyPlaying,
         Func<SpicetifyInstallation?> discover,
-        Func<SpicetifyInstallation, bool, Task<SpicetifyInstallOutcome>> install,
+        Func<SpicetifyInstallation, bool, bool, Task<SpicetifyInstallOutcome>> install,
         Func<TimeSpan, CancellationToken, Task> delay)
     {
         _logger = logger;
@@ -61,8 +62,8 @@ internal sealed class SpicetifyBridgeSetup
             () => bridge.LastDiagnosis,
             isSpotifyPlaying,
             SpicetifyInstallation.Discover,
-            (installation, force) => new SpicetifyExtensionInstaller(logger)
-                .EnsureInstalledAsync(installation, shippedExtensionPath, cliPath, force),
+            (installation, force, restartSpotify) => new SpicetifyExtensionInstaller(logger)
+                .EnsureInstalledAsync(installation, shippedExtensionPath, cliPath, force, restartSpotify),
             Task.Delay);
 
     /// <summary>Patches if needed, then hands off to the watch. Never throws; costs at worst
@@ -76,9 +77,25 @@ internal sealed class SpicetifyBridgeSetup
             // Checked before the grace: waiting first would read a not-yet-attached extension as unpatched.
             if (await IsPlayingAsync())
             {
-                // Installing also applies when the shipped extension is newer; a version behind still fades.
-                _logger.LogInformation(
-                    "Spotify is already playing, so nothing here patches it — that would restart Spotify");
+                // Patched on disk only: restarting Spotify now would stop the room's music, so the
+                // restart is left to the host and the extension attaches whenever it happens.
+                switch (await InstallWithoutRestartAsync())
+                {
+                    case SpicetifyInstallOutcome.Installed:
+                        _logger.LogInformation(
+                            "Spotify is playing, so the KHost bridge was patched in without restarting it");
+
+                        _context.ReportWarning(
+                            "KHost installed its Spicetify bridge, but Spotify was playing so it was "
+                            + "not restarted. Close Spotify and open it again to turn on fading. Until "
+                            + "then break music still plays, at full level.");
+
+                        WaitForRestart(cancellationToken);
+                        return;
+
+                    case SpicetifyInstallOutcome.Failed:
+                        return;
+                }
             }
             else
             {
@@ -158,6 +175,27 @@ internal sealed class SpicetifyBridgeSetup
             _logger.LogWarning(ex, "Could not settle the Spicetify bridge");
         }
     }
+
+    /// <summary>Waits out a patch the running Spotify has not loaded yet, then watches as usual.</summary>
+    /// <remarks>Silent while waiting: the restart it needs has already been asked for.</remarks>
+    internal Task WaitForRestart(CancellationToken cancellationToken = default) => Task.Run(async () =>
+    {
+        while (!_isExtensionReady())
+        {
+            try
+            {
+                await _delay(LossPollInterval, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+        }
+
+        _logger.LogInformation("Spotify was restarted and the KHost bridge attached");
+
+        await WatchForLoss(cancellationToken);
+    });
 
     /// <summary>Reports when the extension goes and stays gone; re-applying would restart it.</summary>
     /// <remarks>Waits before speaking; a detach also looks like an ordinary Spotify restart.</remarks>
@@ -251,13 +289,32 @@ internal sealed class SpicetifyBridgeSetup
             return;
         }
 
-        await _install(installation, false);
+        await _install(installation, false, true);
     }
 
-    /// <summary>Forces the patch past the currency check; reached only where a restart is free.</summary>
-    private async Task<SpicetifyInstallOutcome> ApplyAsync(SpicetifyInstallation installation)
+    /// <summary>Installs over a playing Spotify, forced where Spotify's files lack the extension.</summary>
+    /// <remarks>Forced for the same reason as the apply: an update reverts the patch unseen.</remarks>
+    private async Task<SpicetifyInstallOutcome> InstallWithoutRestartAsync()
     {
-        var outcome = await _install(installation, true);
+        if (_discover() is not { } installation)
+        {
+            _logger.LogInformation(
+                "Spicetify is installed but has never been run, so there is nothing to install the bridge into");
+
+            return SpicetifyInstallOutcome.AlreadyCurrent;
+        }
+
+        if (installation.IsSpotifyPatched())
+            return await _install(installation, false, false);
+
+        return await ApplyAsync(installation, restartSpotify: false);
+    }
+
+    /// <summary>Forces the patch past the currency check; restarts only where a restart is free.</summary>
+    private async Task<SpicetifyInstallOutcome> ApplyAsync(
+        SpicetifyInstallation installation, bool restartSpotify = true)
+    {
+        var outcome = await _install(installation, true, restartSpotify);
 
         if (outcome == SpicetifyInstallOutcome.Failed)
         {

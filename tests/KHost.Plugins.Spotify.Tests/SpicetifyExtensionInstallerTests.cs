@@ -64,6 +64,19 @@ public class SpicetifyExtensionInstallerTests : IDisposable
         Assert.Equal(["config extensions khost-bridge.js", "apply", "backup apply"], _ran);
     }
 
+    /// <summary>Every patching call carries the flag, or whichever one lacks it stops the music.</summary>
+    [Fact]
+    public async Task EnsureInstalledAsync_WithoutRestart_TellsEveryApplyToLeaveSpotifyRunning()
+    {
+        WriteConfig("extensions = khost-bridge.js");
+
+        var outcome = await Installer().EnsureInstalledAsync(
+            Installation, WriteSource("bridge"), Cli, force: true, restartSpotify: false);
+
+        Assert.Equal(SpicetifyInstallOutcome.Installed, outcome);
+        Assert.Equal(["config extensions khost-bridge.js", "apply --no-restart", "backup apply --no-restart"], _ran);
+    }
+
     /// <summary>Applying patches Spotify and restarts it, so a settled host must not have it run.</summary>
     [Fact]
     public async Task EnsureInstalledAsync_AlreadyCurrent_RunsNothing()

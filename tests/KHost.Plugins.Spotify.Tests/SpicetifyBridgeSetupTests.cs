@@ -10,6 +10,8 @@ public class SpicetifyBridgeSetupTests : IDisposable
 {
     private const string Install = "install";
     private const string Apply = "apply";
+    private const string InstallQuietly = "install, no restart";
+    private const string ApplyQuietly = "apply, no restart";
     private const string Wait = "wait";
 
     private readonly DirectoryInfo _root = Directory.CreateTempSubdirectory("khost-bridge-setup-test-");
@@ -30,6 +32,9 @@ public class SpicetifyBridgeSetupTests : IDisposable
     private Func<Task<bool>> _isPlaying = () => Task.FromResult(false);
     private SpicetifyInstallOutcome _outcome = SpicetifyInstallOutcome.Installed;
 
+    /// <summary>What an unforced install reports; the forced one reports <see cref="_outcome"/>.</summary>
+    private SpicetifyInstallOutcome _installOutcome = SpicetifyInstallOutcome.Installed;
+
     public void Dispose()
     {
         _stopping.Cancel();
@@ -40,18 +45,60 @@ public class SpicetifyBridgeSetupTests : IDisposable
         catch (UnauthorizedAccessException) { }
     }
 
-    /// <summary>Unpatched and playing, so patching is both needed and unaffordable. The room
-    /// keeps its music and the host is told why the fade is missing.</summary>
+    /// <summary>Unpatched and playing, so patching is needed and a restart is unaffordable. The
+    /// files are patched with Spotify left running, and the host is asked to restart it.</summary>
     [Fact]
-    public async Task RunAsync_SpotifyIsPlayingAndNotPatched_TouchesNothingOnDisk()
+    public async Task RunAsync_SpotifyIsPlayingAndNotPatched_PatchesWithoutRestartingAndAsksForOne()
     {
         PatchIsMissing();
         _isPlaying = () => Task.FromResult(true);
 
         await Build().RunAsync(_stopping.Token);
 
-        Assert.Equal([Wait], _log);
-        _context.Received(1).ReportWarning(Arg.Is<string>(m => m.Contains("would stop what is playing")));
+        Assert.Equal([ApplyQuietly], _log);
+        _context.Received(1).ReportWarning(Arg.Is<string>(m => m.Contains("Close Spotify and open it again")));
+    }
+
+    /// <summary>A shipped extension newer than the patched one is still worth installing while
+    /// playing; it is the running Spotify, not the files, that must wait for a restart.</summary>
+    [Fact]
+    public async Task RunAsync_SpotifyIsPlayingWithAnOlderBridge_UpdatesItWithoutRestarting()
+    {
+        PatchIsPresent();
+        _isPlaying = () => Task.FromResult(true);
+
+        await Build().RunAsync(_stopping.Token);
+
+        Assert.Equal([InstallQuietly], _log);
+        _context.Received(1).ReportWarning(Arg.Is<string>(m => m.Contains("Close Spotify and open it again")));
+    }
+
+    /// <summary>Already current and patched while playing is the ordinary case: nothing to ask of anyone.</summary>
+    [Fact]
+    public async Task RunAsync_SpotifyIsPlayingAndAlreadyCurrent_AsksForNoRestart()
+    {
+        PatchIsPresent();
+        _installOutcome = SpicetifyInstallOutcome.AlreadyCurrent;
+        _isPlaying = () => Task.FromResult(true);
+
+        await Build(onWait: () => _ready = true).RunAsync(_stopping.Token);
+
+        Assert.Equal([InstallQuietly, Wait], _log);
+        _context.DidNotReceive().ReportWarning(Arg.Any<string>());
+    }
+
+    [Fact]
+    public async Task RunAsync_PatchingWhilePlayingFails_SaysSoAndAsksForNoRestart()
+    {
+        PatchIsMissing();
+        _outcome = SpicetifyInstallOutcome.Failed;
+        _isPlaying = () => Task.FromResult(true);
+
+        await Build().RunAsync(_stopping.Token);
+
+        Assert.Equal([ApplyQuietly], _log);
+        _context.Received(1).ReportWarning(Arg.Is<string>(m => m.Contains("could not patch it")));
+        _context.DidNotReceive().ReportWarning(Arg.Is<string>(m => m.Contains("Close Spotify and open it again")));
     }
 
     /// <summary>The reported failure, in order: nothing playing at startup, Spotify launched by
@@ -147,30 +194,14 @@ public class SpicetifyBridgeSetupTests : IDisposable
     /// <summary>Unknown is taken as playing. Being wrong that way costs a fade; being wrong the
     /// other way stops the room's music.</summary>
     [Fact]
-    public async Task RunAsync_ReadingSpotifyThrows_IsTakenAsPlayingRatherThanPatching()
+    public async Task RunAsync_ReadingSpotifyThrows_IsTakenAsPlayingRatherThanRestarting()
     {
         PatchIsMissing();
         _isPlaying = () => throw new InvalidOperationException("osascript is not available");
 
         await Build().RunAsync(_stopping.Token);
 
-        Assert.DoesNotContain(Apply, _log);
-    }
-
-    /// <summary>Playing at startup, so nothing was patched then, and stopped by the grace, which
-    /// makes patching affordable after all: the one path that reaches a second apply.</summary>
-    [Fact]
-    public async Task RunAsync_PlayingAtStartThenStopsByTheGrace_PatchesAfterAll()
-    {
-        PatchIsMissing();
-
-        var playing = true;
-        _isPlaying = () => Task.FromResult(playing);
-
-        await Build(onWait: () => playing = false).RunAsync(_stopping.Token);
-
-        Assert.Equal([Wait, Apply, Wait], _log);
-        _context.Received(1).ReportWarning(Arg.Is<string>(m => m.Contains("KHost patched Spotify")));
+        Assert.Equal([ApplyQuietly], _log);
     }
 
     /// <summary>Attached and unable to work is its own answer, not a patching problem: the
@@ -247,10 +278,10 @@ public class SpicetifyBridgeSetupTests : IDisposable
             () => _diagnosis,
             () => _isPlaying(),
             () => installation,
-            (_, force) =>
+            (_, force, restartSpotify) =>
             {
-                _log.Add(force ? Apply : Install);
-                return Task.FromResult(force ? _outcome : SpicetifyInstallOutcome.Installed);
+                _log.Add(restartSpotify ? (force ? Apply : Install) : (force ? ApplyQuietly : InstallQuietly));
+                return Task.FromResult(force ? _outcome : _installOutcome);
             },
             (duration, token) =>
             {

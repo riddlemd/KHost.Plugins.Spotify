@@ -246,11 +246,38 @@ public class SpotifyBreakMusicProviderTests
     }
 
     [Fact]
-    public async Task ResumeAsync_ResumesSpotify()
+    public async Task ResumeAsync_SpotifyPausedOnATrack_ResumesSpotify()
     {
+        _controller.State = new SpotifyState(SpotifyPlayback.Paused, "Blue Monday", "New Order");
+
         await Build().ResumeAsync();
 
-        Assert.Equal(["resume"], _controller.Calls);
+        Assert.Equal(["state", "resume"], _controller.Calls);
+    }
+
+    // A freshly launched Spotify reports paused with no track, and accepts a resume that plays
+    // nothing; the host's Play button resumes whenever break music reads as paused.
+    [Fact]
+    public async Task ResumeAsync_SpotifyHasNothingLoaded_StartsTheConfiguredPlaylist()
+    {
+        _controller.State = new SpotifyState(SpotifyPlayback.Paused);
+
+        var provider = Build(new SpotifySettings { PlaylistUri = "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M" });
+        await provider.ResumeAsync();
+
+        Assert.Contains("start", _controller.Calls);
+        Assert.DoesNotContain("resume", _controller.Calls);
+        Assert.Equal("spotify:playlist:37i9dQZF1DXcBWIGoYBM5M", _controller.StartedContextUri);
+    }
+
+    [Fact]
+    public async Task ResumeAsync_StateUnreadable_ResumesSpotify()
+    {
+        _controller.State = null;
+
+        await Build().ResumeAsync();
+
+        Assert.Equal(["state", "resume"], _controller.Calls);
     }
 
     // Reads bracket the skip: one for what it is leaving, one for what it landed on. The point of
