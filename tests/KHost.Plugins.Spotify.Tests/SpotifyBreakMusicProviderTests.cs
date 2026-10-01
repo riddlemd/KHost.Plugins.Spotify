@@ -1,3 +1,5 @@
+using KHost.Abstractions.Exceptions;
+using KHost.Abstractions.Models;
 using KHost.Abstractions.Services;
 using KHost.Plugins.Spotify;
 using KHost.Plugins.Spotify.Control;
@@ -10,12 +12,14 @@ public class SpotifyBreakMusicProviderTests
 {
     private readonly FakeSpotifyController _controller = new();
     private readonly IPluginContext _context = Substitute.For<IPluginContext>();
+    private readonly IFlashService _flash = Substitute.For<IFlashService>();
 
     private SpotifyBreakMusicProvider Build(SpotifySettings? settings = null)
     {
         _context.BindSettings<SpotifySettings>().Returns(settings ?? new SpotifySettings());
 
-        return new SpotifyBreakMusicProvider(NullLogger<SpotifyBreakMusicProvider>.Instance, _context, _controller);
+        return new SpotifyBreakMusicProvider(
+            NullLogger<SpotifyBreakMusicProvider>.Instance, _context, _controller, broker: null, _flash);
     }
 
     [Fact]
@@ -129,11 +133,39 @@ public class SpotifyBreakMusicProviderTests
     }
 
     [Fact]
-    public async Task StartAsync_SpotifyCouldNotBeReached_IsFalse()
+    public async Task StartAsync_SpotifyCouldNotBeReached_ThrowsKHostException()
     {
         _controller.CanStart = false;
 
-        Assert.False(await Build().StartAsync());
+        var ex = await Assert.ThrowsAsync<KHostException>(() => Build().StartAsync());
+
+        Assert.StartsWith("Spotify:", ex.WhatHappened);
+        Assert.Equal("KH-SPOTIFY-START-FAILED", ex.ReferenceCode);
+    }
+
+    // A host pressing play twice while Spotify is still unreachable should hear the reason twice —
+    // it is a reply to their own action, not a one-time notice.
+    [Fact]
+    public async Task StartAsync_SpotifyCouldNotBeReached_EachCallThrows()
+    {
+        _controller.CanStart = false;
+
+        var provider = Build();
+
+        await Assert.ThrowsAsync<KHostException>(() => provider.StartAsync());
+        await Assert.ThrowsAsync<KHostException>(() => provider.StartAsync());
+    }
+
+    [Fact]
+    public async Task StartAsync_SpotifyCouldNotBeReached_DoesNotFlash()
+    {
+        _controller.CanStart = false;
+
+        var provider = Build();
+
+        await Assert.ThrowsAsync<KHostException>(() => provider.StartAsync());
+
+        _flash.DidNotReceiveWithAnyArgs().Show(default!, default);
     }
 
     [Fact]
