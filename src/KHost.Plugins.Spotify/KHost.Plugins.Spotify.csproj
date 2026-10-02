@@ -24,20 +24,6 @@
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
-  <!-- One build reaches the host's plugins folder, not both: the two targets write the same file
-       names, so deploying each in turn would leave whichever finished last. -->
-  <PropertyGroup>
-    <_DeployTargetFramework Condition="$([MSBuild]::IsOSPlatform('Windows'))">net10.0-windows10.0.19041.0</_DeployTargetFramework>
-    <_DeployTargetFramework Condition="!$([MSBuild]::IsOSPlatform('Windows'))">net10.0</_DeployTargetFramework>
-    <!-- BaseOutputPath, not a literal bin\: WSL builds of the same tree use bin/linux/ and must not overwrite the Windows deploy.
-         The SDK only defaults it to bin\ later, in its targets, so it is still empty here unless set by env. -->
-    <!-- KHost/main in the repo/branch layout, else the sibling KHost; first found wins. -->
-    <_KHostRepoDir Condition="Exists('$(MSBuildProjectDirectory)\..\..\..\..\KHost\main')">$(MSBuildProjectDirectory)\..\..\..\..\KHost\main</_KHostRepoDir>
-    <_KHostRepoDir Condition="'$(_KHostRepoDir)' == ''">$(MSBuildProjectDirectory)\..\..\..\KHost</_KHostRepoDir>
-    <_KHostOutputDir>$(_KHostRepoDir)\src\KHost.UserInterface\$([MSBuild]::ValueOrDefault('$(BaseOutputPath)', 'bin\'))Debug\net10.0</_KHostOutputDir>
-    <_PluginDeployDir>$(_KHostOutputDir)\plugins\khost.spotify</_PluginDeployDir>
-  </PropertyGroup>
-
   <ItemGroup>
     <!-- The published contracts, not a sibling checkout: this repo used to fail to build whenever
          the KHost checkout beside it changed branch, and an outside author has no such checkout at
@@ -61,27 +47,5 @@
   <ItemGroup>
     <Content Include="manifest.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
-
-  <!-- Dev convenience: drop the built plugin into a sibling KHost checkout's runtime plugins
-       folder when one exists. Harmless no-op anywhere else. -->
-  <Target Name="DeployToSiblingKHost" AfterTargets="Build"
-          Condition="Exists('$(_KHostOutputDir)') And '$(TargetFramework)' == '$(_DeployTargetFramework)'">
-    <ItemGroup>
-      <!-- Globbed inside the target so it sees what is on disk now, not at evaluation. -->
-      <_StalePluginFiles Include="$(_PluginDeployDir)\**\*" />
-      <_PluginFiles Include="$(TargetDir)**\*" />
-    </ItemGroup>
-
-    <!-- Emptied first, because a copy only overwrites what it brings: renaming the assembly or
-         dropping a reference otherwise leaves the old file beside the new one, and the folder
-         stops matching what the build produced. It also keeps the two target frameworks from
-         layering, since only one of them ships the WinRT projection. ContinueOnError so a running
-         KHost, which holds every loaded plugin assembly mapped on Windows, fails on the copy below
-         with a message that names the locking process instead of here with a bare delete error. -->
-    <Delete Files="@(_StalePluginFiles)" ContinueOnError="true" />
-
-    <Copy SourceFiles="@(_PluginFiles)"
-          DestinationFiles="@(_PluginFiles->'$(_PluginDeployDir)\%(RecursiveDir)%(Filename)%(Extension)')" />
-  </Target>
 
 </Project>

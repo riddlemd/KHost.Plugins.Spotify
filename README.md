@@ -124,10 +124,7 @@ dotnet test tests/KHost.Plugins.Spotify.Tests
 ```
 
 It targets `net10.0` and `net10.0-windows10.0.19041.0`; the second exists only for the Windows media
-session. Building also drops the plugin into a sibling KHost checkout's runtime plugins folder
-(`../KHost/src/KHost.UserInterface/bin/Debug/net10.0/plugins/khost.spotify/`) when it exists. The
-folder is emptied first, and only one target goes in: the Windows one on Windows, the portable one
-elsewhere.
+session.
 
 ## Installing
 
