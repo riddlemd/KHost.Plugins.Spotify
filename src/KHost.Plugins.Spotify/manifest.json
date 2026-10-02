@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/riddlemd/KHost/main/src/KHost.Abstractions/Models/Plugins/manifest.schema.json",
   "id": "6b1d3a58-4f27-4c0e-9a11-2e5c7d8b4f36",
   "name": "Spotify Break Music",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "author": "KHost",
   "description": "Plays break music through the Spotify desktop app on this machine.",
   "icon": "music-note-beamed",
