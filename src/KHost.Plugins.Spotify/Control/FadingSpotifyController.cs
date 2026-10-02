@@ -45,8 +45,21 @@ internal sealed class FadingSpotifyController : ISpotifyController
     /// <summary>Zero is the host turning fades off, which is not a failure to report.</summary>
     private bool CanFade => _fader.IsAvailable && _fade > TimeSpan.Zero;
 
-    public Task StartWatchingAsync(CancellationToken cancellationToken = default)
-        => _inner.StartWatchingAsync(cancellationToken);
+    /// <summary>Also brings back a level an unfinished fade still owes: a KHost closed or killed
+    /// mid-fade leaves Spotify low, and it may play on at that level before any command arrives.</summary>
+    public async Task StartWatchingAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _inner.StartWatchingAsync(cancellationToken);
+        }
+        finally
+        {
+            // Not flashed: nobody asked for anything yet, and the first command reports a fault.
+            if (CanFade && await _fader.RestoreOnceHeardAsync(_fade, cancellationToken) == FadeOutcome.Landed)
+                _silenced = false;
+        }
+    }
 
     public Task<SpotifyState?> GetStateAsync(CancellationToken cancellationToken = default)
         => _inner.GetStateAsync(cancellationToken);

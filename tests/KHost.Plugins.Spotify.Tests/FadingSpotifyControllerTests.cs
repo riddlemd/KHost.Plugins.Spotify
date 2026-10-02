@@ -288,6 +288,33 @@ public class FadingSpotifyControllerTests
         Assert.Equal(1, raised);
     }
 
+    // A KHost stopped mid-fade left Spotify low, and it may be playing on at that level.
+    [Fact]
+    public async Task StartingTheWatch_BringsBackAnyLevelOwed()
+    {
+        await Build().StartWatchingAsync();
+
+        Assert.Equal(["restore once heard 1500"], _inner.Calls);
+    }
+
+    [Fact]
+    public async Task StartingTheWatch_WithFadingOff_LeavesTheLevelAlone()
+    {
+        await Build(TimeSpan.Zero).StartWatchingAsync();
+
+        Assert.Empty(_inner.Calls);
+    }
+
+    [Fact]
+    public async Task StartingTheWatch_AFailedRestore_IsNotFlashed()
+    {
+        _fader.Outcome = FadeOutcome.Failed;
+
+        await Build().StartWatchingAsync();
+
+        _flash.DidNotReceiveWithAnyArgs().Show(default!, default);
+    }
+
     [Fact]
     public async Task StartingTheWatch_ReachesTheBackend()
     {
