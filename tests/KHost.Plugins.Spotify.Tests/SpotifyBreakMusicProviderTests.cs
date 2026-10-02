@@ -220,7 +220,7 @@ public class SpotifyBreakMusicProviderTests
     {
         Build(new SpotifySettings { PlaylistUri = "https://example.com/nope" });
 
-        _context.Received(1).ReportWarning(Arg.Is<string>(message => message.Contains("https://example.com/nope")));
+        _context.Received(1).AddWarning(Arg.Is<string>(message => message.Contains("https://example.com/nope")));
     }
 
     [Fact]
@@ -228,7 +228,7 @@ public class SpotifyBreakMusicProviderTests
     {
         Build(new SpotifySettings { PlaylistUri = "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M" });
 
-        _context.DidNotReceive().ReportWarning(Arg.Any<string>());
+        _context.DidNotReceive().AddWarning(Arg.Any<string>());
     }
 
     [Fact]
@@ -238,7 +238,7 @@ public class SpotifyBreakMusicProviderTests
 
         Build();
 
-        _context.Received(1).ReportWarning("The media keys reach whichever app owns media focus.");
+        _context.Received(1).AddWarning("The media keys reach whichever app owns media focus.");
     }
 
     [Fact]

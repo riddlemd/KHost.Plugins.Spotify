@@ -69,13 +69,13 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
 
         if (!string.IsNullOrWhiteSpace(settings.PlaylistUri) && _contextUri is null)
         {
-            context.ReportWarning(
+            context.AddWarning(
                 $"'{settings.PlaylistUri}' is not a Spotify playlist, album or artist link, so break "
                 + "music will resume whatever Spotify already has loaded instead.");
         }
 
         if (_controller.Limitation is { } limitation)
-            context.ReportWarning(limitation);
+            context.AddWarning(limitation);
 
         // Relayed onto the broker, which is how the SDK says a provider reports moving on its own.
         // The host re-reads on it, so this carries no payload of its own.
