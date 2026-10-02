@@ -45,8 +45,21 @@ internal sealed class FadingSpotifyController : ISpotifyController
     /// <summary>Zero is the host turning fades off, which is not a failure to report.</summary>
     private bool CanFade => _fader.IsAvailable && _fade > TimeSpan.Zero;
 
-    public Task StartWatchingAsync(CancellationToken cancellationToken = default)
-        => _inner.StartWatchingAsync(cancellationToken);
+    /// <summary>Also brings back a level an unfinished fade still owes: a KHost closed or killed
+    /// mid-fade leaves Spotify low, and it may play on at that level before any command arrives.</summary>
+    public async Task StartWatchingAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _inner.StartWatchingAsync(cancellationToken);
+        }
+        finally
+        {
+            // Not flashed: nobody asked for anything yet, and the first command reports a fault.
+            if (CanFade && await _fader.RestoreOnceHeardAsync(_fade, cancellationToken) == FadeOutcome.Landed)
+                _silenced = false;
+        }
+    }
 
     public Task<SpotifyState?> GetStateAsync(CancellationToken cancellationToken = default)
         => _inner.GetStateAsync(cancellationToken);
@@ -56,19 +69,18 @@ internal sealed class FadingSpotifyController : ISpotifyController
     {
         // Waited for rather than fired off: a playlist that loads while the level is still up is
         // heard as a burst of it before the fade in has begun.
-        var silenced = await SilenceAsync(TimeSpan.Zero, cancellationToken);
+        var silence = await FadeOutAsync(TimeSpan.Zero, cancellationToken);
 
         if (!await _inner.StartAsync(contextUri, shuffle, cancellationToken))
         {
             // Nothing started, so the silence just set would be permanent.
-            if (silenced)
+            if (silence == FadeOutcome.Landed)
                 await RestoreAsync(TimeSpan.Zero, cancellationToken);
 
             return false;
         }
 
-        if (silenced)
-            await RestoreAsync(_fade, cancellationToken);
+        await ComeBackUpAsync(silence, cancellationToken);
 
         return true;
     }
@@ -83,12 +95,11 @@ internal sealed class FadingSpotifyController : ISpotifyController
     /// who turned Spotify up while it sat paused has that level come back, not the old one.</summary>
     public async Task ResumeAsync(CancellationToken cancellationToken = default)
     {
-        var silenced = await SilenceAsync(TimeSpan.Zero, cancellationToken);
+        var silence = await FadeOutAsync(TimeSpan.Zero, cancellationToken);
 
         await _inner.ResumeAsync(cancellationToken);
 
-        if (silenced)
-            await RestoreAsync(_fade, cancellationToken);
+        await ComeBackUpAsync(silence, cancellationToken);
     }
 
     /// <summary>The level is put back once stopped, or Spotify is left muted for whoever reaches
@@ -99,8 +110,8 @@ internal sealed class FadingSpotifyController : ISpotifyController
 
         await _inner.StopAsync(cancellationToken);
 
-        if (faded)
-            await RestoreAsync(TimeSpan.Zero, cancellationToken);
+        if (faded && CanFade && Note(await _fader.RestoreOnceQuietAsync(cancellationToken)))
+            _silenced = false;
     }
 
     /// <summary>Not faded while the music is up: a skip is meant to be heard as one. Out of a fade
@@ -114,16 +125,35 @@ internal sealed class FadingSpotifyController : ISpotifyController
     }
 
     private async Task<bool> SilenceAsync(TimeSpan duration, CancellationToken cancellationToken)
+        => await FadeOutAsync(duration, cancellationToken) == FadeOutcome.Landed;
+
+    /// <summary>Null where nothing is faded at all.</summary>
+    private async Task<FadeOutcome?> FadeOutAsync(TimeSpan duration, CancellationToken cancellationToken)
     {
         if (!CanFade)
-            return false;
+            return null;
 
-        var landed = Note(await _fader.SilenceAsync(duration, cancellationToken));
+        var outcome = await _fader.SilenceAsync(duration, cancellationToken);
 
-        if (landed)
+        if (Note(outcome))
             _silenced = true;
 
-        return landed;
+        return outcome;
+    }
+
+    /// <summary>Nothing to fade means Spotify had no audio open, which is how a relaunched one looks:
+    /// it may come back at a level an unfinished fade left, so that is waited for and put back.</summary>
+    private async Task ComeBackUpAsync(FadeOutcome? silence, CancellationToken cancellationToken)
+    {
+        if (silence == FadeOutcome.Landed)
+        {
+            await RestoreAsync(_fade, cancellationToken);
+        }
+        else if (silence == FadeOutcome.NothingToFade
+            && Note(await _fader.RestoreOnceHeardAsync(_fade, cancellationToken)))
+        {
+            _silenced = false;
+        }
     }
 
     private async Task RestoreAsync(TimeSpan duration, CancellationToken cancellationToken)

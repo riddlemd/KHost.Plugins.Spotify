@@ -156,13 +156,16 @@ public class MacOsSpotifyFaderTests
 {
     private readonly List<string> _scripts = [];
     private readonly Queue<ProcessResult> _replies = new();
+    private readonly FakePendingFadeLevels _pending = new();
+    private Action? _onRun;
 
     private MacOsSpotifyFader Build()
         => new(NullLogger.Instance, (_, arguments, _) =>
         {
+            _onRun?.Invoke();
             _scripts.Add(arguments.Last());
             return Task.FromResult(_replies.Dequeue());
-        });
+        }, _pending);
 
     private void Reply(string output, int exitCode = 0)
         => _replies.Enqueue(new ProcessResult(exitCode, output, exitCode == 0 ? "" : output));
@@ -331,5 +334,70 @@ public class MacOsSpotifyFaderTests
         await fader.RestoreAsync(TimeSpan.Zero);
 
         Assert.Contains("set candidates to {65, 64, 63}", _scripts[^1]);
+    }
+
+    // ── the level owed, kept across a Spotify or a KHost restart ────────────────────────
+
+    // The level is read inside the fade's own run, so the record is what is known before it and
+    // corrected from what the run reports.
+    [Fact]
+    public async Task SilenceAsync_SavesTheLevelFound()
+    {
+        Reply("64	0");
+
+        await Build().SilenceAsync(TimeSpan.Zero);
+
+        Assert.Equal(0.64, _pending.Levels[MacOsSpotifyFader.LevelKey]);
+    }
+
+    [Fact]
+    public async Task ALaterSilence_SavesTheKnownLevelBeforeItsRun()
+    {
+        var fader = Build();
+        Reply("64	0");
+        await fader.SilenceAsync(TimeSpan.Zero);
+        Reply("0	64");
+        await fader.RestoreAsync(TimeSpan.Zero);
+
+        double? savedAtRun = null;
+        _onRun = () => savedAtRun = _pending.Levels.GetValueOrDefault(MacOsSpotifyFader.LevelKey);
+        Reply("64	0");
+        await fader.SilenceAsync(TimeSpan.FromSeconds(1.5));
+
+        Assert.Equal(0.64, savedAtRun);
+    }
+
+    [Fact]
+    public async Task RestoreAsync_ClearsTheRecordOnceTheLevelIsBack()
+    {
+        var fader = Build();
+        Reply("64	0");
+        await fader.SilenceAsync(TimeSpan.Zero);
+        Reply("0	64");
+        await fader.RestoreAsync(TimeSpan.Zero);
+
+        Assert.Empty(_pending.Levels);
+    }
+
+    // Spotify keeps its own volume across a restart, so a KHost started after one died mid-fade
+    // finds it low; the record wins over that reading.
+    [Fact]
+    public async Task AFreshFaderWithALevelOwed_RestoresItFromWhereverSpotifyIs()
+    {
+        _pending.Levels[MacOsSpotifyFader.LevelKey] = 0.37;
+
+        Reply("12	37");
+        Assert.Equal(FadeOutcome.Landed, await Build().RestoreOnceHeardAsync(TimeSpan.Zero));
+
+        Assert.Contains("set candidates to {38, 37, 36}", _scripts[0]);
+        Assert.Contains("if startLevel < 0 or startLevel > 100 then return", _scripts[0]);
+        Assert.Empty(_pending.Levels);
+    }
+
+    [Fact]
+    public async Task AFreshFaderWithNothingOwed_HasNothingToRestore()
+    {
+        Assert.Equal(FadeOutcome.NothingToFade, await Build().RestoreOnceHeardAsync(TimeSpan.Zero));
+        Assert.Empty(_scripts);
     }
 }

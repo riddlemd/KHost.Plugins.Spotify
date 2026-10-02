@@ -324,7 +324,10 @@ public class SpotifyBreakMusicProviderTests
     [InlineData(1f)]
     public async Task SetVolumeAsync_AnyLevel_LeavesSpotifyAlone(float volume)
     {
-        await Build(settings: null, new FakeSpotifyFader(_controller.Calls)).SetVolumeAsync(volume);
+        var provider = Build(settings: null, new FakeSpotifyFader(_controller.Calls));
+        _controller.Calls.Clear();
+
+        await provider.SetVolumeAsync(volume);
 
         Assert.Empty(_controller.Calls);
     }
@@ -334,10 +337,11 @@ public class SpotifyBreakMusicProviderTests
     public async Task StopAsync_AFadeAsked_FadesOverThePluginsOwnLengthAndPutsTheLevelBack()
     {
         var provider = Build(new SpotifySettings { FadeMilliseconds = 1200 }, new FakeSpotifyFader(_controller.Calls));
+        _controller.Calls.Clear();
 
         await provider.StopAsync(TimeSpan.FromSeconds(2));
 
-        Assert.Equal(["silence 1200", "stop", "restore 0"], _controller.Calls);
+        Assert.Equal(["silence 1200", "stop", "restore once quiet"], _controller.Calls);
     }
 
     [Fact]

@@ -58,14 +58,14 @@ public class FadingSpotifyControllerTests
         Assert.Equal(["silence 0", "resume", "restore 1500"], _inner.Calls);
     }
 
-    // The way back is bookkeeping over a stopped Spotify, so it is instant, but it has to happen
-    // or Spotify is left muted for whoever reaches for it next.
+    // The way back has to happen or Spotify is left muted for whoever reaches for it next, but
+    // only once its last buffer has played, or that buffer is heard at full level.
     [Fact]
-    public async Task StopAsync_FadesOutStopsThenPutsTheLevelBack()
+    public async Task StopAsync_FadesOutStopsThenPutsTheLevelBackOnceQuiet()
     {
         await Build().StopAsync();
 
-        Assert.Equal(["silence 1500", "stop", "restore 0"], _inner.Calls);
+        Assert.Equal(["silence 1500", "stop", "restore once quiet"], _inner.Calls);
     }
 
     [Fact]
@@ -114,6 +114,43 @@ public class FadingSpotifyControllerTests
         var controller = Build();
         _fader.Outcome = FadeOutcome.Failed;
         await controller.PauseAsync();
+        _inner.Calls.Clear();
+
+        await controller.SkipAsync();
+
+        Assert.Equal(["skip"], _inner.Calls);
+    }
+
+    // Nothing to silence is how a relaunched Spotify looks: it may be back at a level an
+    // unfinished fade left, which only the fader can tell.
+    [Fact]
+    public async Task StartAsync_SpotifyHadNoAudioOpen_BringsBackAnyLevelOwedOnceItIsHeard()
+    {
+        _fader.Outcomes.Enqueue(FadeOutcome.NothingToFade);
+
+        Assert.True(await Build().StartAsync(null, shuffle: false));
+
+        Assert.Equal(["silence 0", "start", "restore once heard 1500"], _inner.Calls);
+    }
+
+    [Fact]
+    public async Task ResumeAsync_SpotifyHadNoAudioOpen_BringsBackAnyLevelOwedOnceItIsHeard()
+    {
+        _fader.Outcomes.Enqueue(FadeOutcome.NothingToFade);
+
+        await Build().ResumeAsync();
+
+        Assert.Equal(["silence 0", "resume", "restore once heard 1500"], _inner.Calls);
+    }
+
+    // A level brought back that way is up, so a skip after it is a plain skip.
+    [Fact]
+    public async Task SkipAsync_AfterALevelOwedWasBroughtBack_IsAPlainSkip()
+    {
+        var controller = Build();
+        await controller.PauseAsync();
+        _fader.Outcomes.Enqueue(FadeOutcome.NothingToFade);
+        await controller.ResumeAsync();
         _inner.Calls.Clear();
 
         await controller.SkipAsync();
@@ -249,6 +286,33 @@ public class FadingSpotifyControllerTests
         _inner.RaisePlaybackChanged();
 
         Assert.Equal(1, raised);
+    }
+
+    // A KHost stopped mid-fade left Spotify low, and it may be playing on at that level.
+    [Fact]
+    public async Task StartingTheWatch_BringsBackAnyLevelOwed()
+    {
+        await Build().StartWatchingAsync();
+
+        Assert.Equal(["restore once heard 1500"], _inner.Calls);
+    }
+
+    [Fact]
+    public async Task StartingTheWatch_WithFadingOff_LeavesTheLevelAlone()
+    {
+        await Build(TimeSpan.Zero).StartWatchingAsync();
+
+        Assert.Empty(_inner.Calls);
+    }
+
+    [Fact]
+    public async Task StartingTheWatch_AFailedRestore_IsNotFlashed()
+    {
+        _fader.Outcome = FadeOutcome.Failed;
+
+        await Build().StartWatchingAsync();
+
+        _flash.DidNotReceiveWithAnyArgs().Show(default!, default);
     }
 
     [Fact]

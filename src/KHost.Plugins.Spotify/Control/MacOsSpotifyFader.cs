@@ -13,21 +13,27 @@ internal sealed class MacOsSpotifyFader : SupersedingFader
     /// the room at whatever level it had reached.</summary>
     private static readonly TimeSpan LongestFade = TimeSpan.FromSeconds(8);
 
-    private readonly ILogger _logger;
+    /// <summary>Spotify.app has one level, so the record holds one.</summary>
+    internal const string LevelKey = "spotify";
+
     private readonly Func<string, IEnumerable<string>, CancellationToken, Task<ProcessResult>> _run;
 
     /// <summary>Spotify's own 0 to 100 integer scale, so a level is ours only if it reads back exactly.</summary>
     private readonly FadeLevel _level = new(tolerance: 0);
 
-    public MacOsSpotifyFader(ILogger logger)
-        : this(logger, (file, arguments, token) => ProcessRunner.RunAsync(file, arguments, token))
+    private bool _attached;
+
+    public MacOsSpotifyFader(ILogger logger, IPendingFadeLevels? pending = null)
+        : this(logger, (file, arguments, token) => ProcessRunner.RunAsync(file, arguments, token), pending)
     {
     }
 
     internal MacOsSpotifyFader(
-        ILogger logger, Func<string, IEnumerable<string>, CancellationToken, Task<ProcessResult>> run)
+        ILogger logger,
+        Func<string, IEnumerable<string>, CancellationToken, Task<ProcessResult>> run,
+        IPendingFadeLevels? pending = null)
+        : base(logger, pending)
     {
-        _logger = logger;
         _run = run;
     }
 
@@ -39,9 +45,16 @@ internal sealed class MacOsSpotifyFader : SupersedingFader
         int target;
         (int Low, int High)? onlyFrom = null;
 
+        Attach();
+
         if (silence)
         {
             target = 0;
+
+            // The level is only read inside the fade's own run, so what is known now is saved
+            // first and corrected once the run reports where it started.
+            if (_level.Target is { } known)
+                SavePending(known);
         }
         else
         {
@@ -68,13 +81,13 @@ internal sealed class MacOsSpotifyFader : SupersedingFader
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Could not fade Spotify");
+            Logger.LogWarning(ex, "Could not fade Spotify");
             return FadeOutcome.Failed;
         }
 
         if (!result.Succeeded)
         {
-            _logger.LogWarning("Spotify refused a fade: {Message}", result.Message);
+            Logger.LogWarning("Spotify refused a fade: {Message}", result.Message);
             return FadeOutcome.Failed;
         }
 
@@ -83,26 +96,60 @@ internal sealed class MacOsSpotifyFader : SupersedingFader
 
         if (MacOsScripts.ParseFade(result.StandardOutput) is not { } levels)
         {
-            _logger.LogWarning("Could not read the fade's result: {Output}", result.StandardOutput.Trim());
+            Logger.LogWarning("Could not read the fade's result: {Output}", result.StandardOutput.Trim());
             return FadeOutcome.Failed;
         }
 
         if (silence)
         {
             _level.NoteFadeOutFrom(levels.Start);
+            SavePending(_level.Target ?? 0);
         }
         else if (!_level.IsOurs(levels.Start))
         {
-            _logger.LogInformation(
+            Logger.LogInformation(
                 "Spotify was set to {Level} while silent; keeping that rather than restoring {Target}",
                 levels.Start, target);
 
             _level.AdoptHostLevel(levels.Start);
+            UpdatePending(new Dictionary<string, double>(), [LevelKey]);
             return FadeOutcome.Landed;
         }
 
         _level.NoteLanded(levels.Final);
 
+        if (!silence)
+            UpdatePending(new Dictionary<string, double>(), [LevelKey]);
+
         return FadeOutcome.Landed;
+    }
+
+    /// <summary>The first fade in this process takes a level an earlier one still owes Spotify,
+    /// which keeps its own volume across a restart, over whatever it now reads.</summary>
+    private void Attach()
+    {
+        if (_attached)
+            return;
+
+        _attached = true;
+
+        if (ReadPending().TryGetValue(LevelKey, out var saved))
+        {
+            var level = (int)Math.Round(saved * 100);
+
+            Logger.LogInformation(
+                "Restoring Spotify to {Saved}, the level saved before a fade that never finished", level);
+
+            _level.AwaitRestore(level, ceiling: 100);
+        }
+    }
+
+    /// <summary>On Spotify's 0 to 100 scale; a 0 is no level to come back to, and drops the record.</summary>
+    private void SavePending(double level)
+    {
+        if (PendingFadeLevelFile.IsRestorable(level / 100))
+            UpdatePending(new Dictionary<string, double> { [LevelKey] = level / 100 }, []);
+        else
+            UpdatePending(new Dictionary<string, double>(), [LevelKey]);
     }
 }

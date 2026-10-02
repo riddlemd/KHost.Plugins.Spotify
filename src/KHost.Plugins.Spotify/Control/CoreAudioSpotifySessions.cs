@@ -16,6 +16,7 @@ internal sealed class CoreAudioSpotifySessions : ISpotifyAudioSessions
     private const int RenderFlow = 0;          // EDataFlow.eRender
     private const int DeviceStateActive = 0x1; // DEVICE_STATE_ACTIVE
     private const int ClsCtxAll = 0x17;        // CLSCTX_ALL
+    private const int SessionStateActive = 1;  // AudioSessionState.AudioSessionStateActive
 
     private static readonly Guid MMDeviceEnumeratorClsid = new("BCDE0395-E52F-467C-8E3D-C4579291692E");
 
@@ -100,8 +101,9 @@ internal sealed class CoreAudioSpotifySessions : ISpotifyAudioSessions
                             continue;
 
                         control2.GetSessionInstanceIdentifier(out var id);
+                        control2.GetSessionIdentifier(out var levelKey);
 
-                        found.Add(new Session(id, (ISimpleAudioVolume)control, control));
+                        found.Add(new Session(id, levelKey, (ISimpleAudioVolume)control, control));
                         keep = true;
                     }
                     finally
@@ -137,9 +139,11 @@ internal sealed class CoreAudioSpotifySessions : ISpotifyAudioSessions
         }
     }
 
-    private sealed class Session(string id, ISimpleAudioVolume volume, object comObject) : ISpotifyAudioSession
+    private sealed class Session(string id, string levelKey, ISimpleAudioVolume volume, object comObject) : ISpotifyAudioSession
     {
         public string Id { get; } = id;
+
+        public string LevelKey { get; } = levelKey;
 
         public float Volume
         {
@@ -152,6 +156,15 @@ internal sealed class CoreAudioSpotifySessions : ISpotifyAudioSessions
             {
                 var eventContext = Guid.Empty;
                 volume.SetMasterVolume(Math.Clamp(value, 0f, 1f), ref eventContext);
+            }
+        }
+
+        public bool IsActive
+        {
+            get
+            {
+                ((IAudioSessionControl2)comObject).GetState(out var state);
+                return state == SessionStateActive;
             }
         }
 
