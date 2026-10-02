@@ -239,7 +239,24 @@ public sealed class WindowsSpotifyController : ISpotifyController
 
             var properties = await session.TryGetMediaPropertiesAsync().AsTask(cancellationToken);
 
-            return new SpotifyState(playback, properties?.Title, properties?.Artist);
+            long? progressMs = null;
+            long? durationMs = null;
+
+            if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763))
+            {
+                // Position is as of the session's last update, which is exact while paused: the
+                // only time the playhead is asked for, to tell a stall from a pause.
+                var timeline = session.GetTimelineProperties();
+                var duration = timeline.EndTime - timeline.StartTime;
+
+                if (duration > TimeSpan.Zero)
+                {
+                    progressMs = (long)(timeline.Position - timeline.StartTime).TotalMilliseconds;
+                    durationMs = (long)duration.TotalMilliseconds;
+                }
+            }
+
+            return new SpotifyState(playback, properties?.Title, properties?.Artist, progressMs, durationMs);
         }
         catch (Exception ex)
         {

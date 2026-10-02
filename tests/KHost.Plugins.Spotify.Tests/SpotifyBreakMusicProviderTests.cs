@@ -4,6 +4,7 @@ using KHost.Abstractions.Services;
 using KHost.Plugins.Spotify;
 using KHost.Plugins.Spotify.Control;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using System.Diagnostics;
 
 namespace KHost.Plugins.Spotify.Tests;
@@ -15,11 +16,14 @@ public class SpotifyBreakMusicProviderTests
     private readonly IFlashService _flash = Substitute.For<IFlashService>();
 
     private SpotifyBreakMusicProvider Build(SpotifySettings? settings = null)
+        => Build(settings, fader: null);
+
+    private SpotifyBreakMusicProvider Build(SpotifySettings? settings, FakeSpotifyFader? fader, TimeProvider? time = null)
     {
         _context.BindSettings<SpotifySettings>().Returns(settings ?? new SpotifySettings());
 
         return new SpotifyBreakMusicProvider(
-            NullLogger<SpotifyBreakMusicProvider>.Instance, _context, _controller, broker: null, _flash);
+            NullLogger<SpotifyBreakMusicProvider>.Instance, _context, _controller, broker: null, _flash, fader, time);
     }
 
     [Fact]
@@ -312,32 +316,69 @@ public class SpotifyBreakMusicProviderTests
     }
 
     /// <summary>Spotify's level is the host's own setting, in an app they can see. KHost pushes
-    /// the venue volume everywhere it can, and this one has to decline rather than move a slider.</summary>
+    /// the venue volume everywhere it can, and this one has to decline rather than move a slider,
+    /// faded or otherwise.</summary>
     [Theory]
     [InlineData(0f)]
     [InlineData(0.35f)]
     [InlineData(1f)]
     public async Task SetVolumeAsync_AnyLevel_LeavesSpotifyAlone(float volume)
     {
-        await Build().SetVolumeAsync(volume);
+        await Build(settings: null, new FakeSpotifyFader(_controller.Calls)).SetVolumeAsync(volume);
 
         Assert.Empty(_controller.Calls);
+    }
+
+    // The fade is the plugin's own setting; KHost's hint would hold the singer at the microphone.
+    [Fact]
+    public async Task StopAsync_AFadeAsked_FadesOverThePluginsOwnLengthAndPutsTheLevelBack()
+    {
+        var provider = Build(new SpotifySettings { FadeMilliseconds = 1200 }, new FakeSpotifyFader(_controller.Calls));
+
+        await provider.StopAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Equal(["silence 1200", "stop", "restore 0"], _controller.Calls);
+    }
+
+    [Fact]
+    public async Task AFadeOfZero_NeverTouchesSpotifysLevel()
+    {
+        var provider = Build(new SpotifySettings { FadeMilliseconds = 0 }, new FakeSpotifyFader(_controller.Calls));
+
+        await provider.StartAsync();
+        await provider.PauseAsync();
+        await provider.StopAsync();
+
+        Assert.DoesNotContain(_controller.Calls, call => call.StartsWith("silence") || call.StartsWith("restore"));
+    }
+
+    [Fact]
+    public async Task AStallSpotifyReports_IsNudgedWhenTheVenueAsksForIt()
+    {
+        var time = new FakeTimeProvider();
+        Build(new SpotifySettings(), fader: null, time);
+
+        _controller.State = new SpotifyState(SpotifyPlayback.Paused, "Free Fallin'", "Tom Petty", 179000, 180000);
+        _controller.RaisePlaybackChanged();
+
+        Assert.Contains("resume", _controller.Calls);
+    }
+
+    [Fact]
+    public void AStallSpotifyReports_IsLeftAloneWhenTheVenueTurnedRecoveryOff()
+    {
+        Build(new SpotifySettings { RecoverStalledPlayback = false }, fader: null, new FakeTimeProvider());
+
+        _controller.State = new SpotifyState(SpotifyPlayback.Paused, "Free Fallin'", "Tom Petty", 179000, 180000);
+        _controller.RaisePlaybackChanged();
+
+        Assert.DoesNotContain("resume", _controller.Calls);
     }
 
     [Fact]
     public async Task StopAsync_NoFadeAsked_Stops()
     {
         await Build().StopAsync();
-
-        Assert.Equal(["stop"], _controller.Calls);
-    }
-
-    /// <summary>The fade hint is ignored outright: KHost suspends break music before it loads a
-    /// song and waits on it, so there is no gap for a fade to fill.</summary>
-    [Fact]
-    public async Task StopAsync_AFadeAsked_StopsAtOnceWithoutTouchingTheVolume()
-    {
-        await Build().StopAsync(TimeSpan.FromSeconds(2));
 
         Assert.Equal(["stop"], _controller.Calls);
     }

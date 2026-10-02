@@ -3,14 +3,14 @@ using KHost.Abstractions.Messaging;
 using KHost.Abstractions.Messaging.Messages;
 using KHost.Abstractions.Models;
 using KHost.Abstractions.Services;
-using KHost.Plugins.Spotify.Bridge;
 using KHost.Plugins.Spotify.Control;
 using Microsoft.Extensions.Logging;
 
 namespace KHost.Plugins.Spotify;
 
 /// <summary>Break music out of the Spotify desktop app on this machine. The host carries none of
-/// this audio, so nothing here routes it to a screen or Cast, and nothing here touches the level.</summary>
+/// this audio, so nothing here routes it to a screen or Cast. Spotify's level is only ever faded
+/// away from and back to wherever the host set it.</summary>
 public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
 {
     /// <summary>Up to a second and a half, which is longer than Spotify has needed to turn a
@@ -21,7 +21,6 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
     private readonly ILogger<SpotifyBreakMusicProvider> _logger;
     private readonly IMessageBroker? _broker;
     private readonly ISpotifyController _controller;
-    private readonly SpicetifyBridge? _bridge;
     private readonly string? _contextUri;
     private readonly bool _shuffle;
 
@@ -32,12 +31,17 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
     {
     }
 
+    /// <param name="controller">A stand-in for the platform backend; null picks the one for this OS.</param>
+    /// <param name="fader">Null picks this OS's own when the backend is too, and fades nothing
+    /// around a stand-in backend.</param>
     internal SpotifyBreakMusicProvider(
         ILogger<SpotifyBreakMusicProvider> logger,
         IPluginContext context,
         ISpotifyController? controller,
         IMessageBroker? broker = null,
-        IFlashService? flash = null)
+        IFlashService? flash = null,
+        ISpotifyFader? fader = null,
+        TimeProvider? time = null)
     {
         _logger = logger;
         _broker = broker;
@@ -49,37 +53,17 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
 
         var platform = controller ?? SpotifyControllerFactory.ForCurrentPlatform(logger, settings.LaunchIfNotRunning);
 
-        if (settings.SpicetifyBridge && controller is null)
+        if (controller is null)
+            fader ??= SpotifyControllerFactory.FaderForCurrentPlatform(logger);
+
+        if (fader is not null)
         {
-            _bridge = new SpicetifyBridge(
-                logger, settings.SpicetifyBridgePort, settings.RecoverStalledPlayback);
-            _bridge.Start();
-
-            platform = new BridgedSpotifyController(
-                platform, _bridge, TimeSpan.FromMilliseconds(Math.Max(0, settings.FadeMilliseconds)), flash);
-
-            if (SpicetifyInstallation.FindCli() is { } cli)
-            {
-                // Off the constructor: this patches Spotify and restarts it on first run, which is
-                // too slow to hold up the host starting. It asks whether Spotify is playing first.
-                var spotify = platform;
-
-                _ = Task.Run(() => SpicetifyBridgeSetup.ForThisMachine(
-                    logger, context, _bridge,
-                    async () => (await spotify.GetStateAsync())?.Playback == SpotifyPlayback.Playing,
-                    cli, ShippedExtensionPath).RunAsync());
-            }
-            else
-            {
-                logger.LogInformation("Spicetify was not found on PATH or where its installer puts it, so break music will not fade");
-
-                context.ReportWarning(
-                    "Break music fades in and out only on a machine with Spicetify installed — it is "
-                    + "what lets KHost reach Spotify's own volume. Without it break music still plays, "
-                    + "but it starts and stops at full level. Install Spicetify from spicetify.app and "
-                    + "restart KHost; the rest is set up for you.");
-            }
+            platform = new FadingSpotifyController(
+                platform, fader, TimeSpan.FromMilliseconds(Math.Max(0, settings.FadeMilliseconds)), flash);
         }
+
+        if (settings.RecoverStalledPlayback)
+            platform = new StallRecoveringSpotifyController(platform, time ?? TimeProvider.System, logger);
 
         _controller = platform;
 
@@ -186,8 +170,8 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
         await _controller.ResumeAsync(cancellationToken);
     }
 
-    /// <summary><paramref name="fadeDuration"/> is ignored. Ramping Spotify's own volume is the
-    /// host's setting to keep, and each step was a process spawn that blocked the console.</summary>
+    /// <summary><paramref name="fadeDuration"/> is ignored: the fade is this plugin's own setting,
+    /// and the level is put back once stopped so Spotify is never left muted.</summary>
     public Task StopAsync(TimeSpan? fadeDuration = null, CancellationToken cancellationToken = default)
         => _controller.StopAsync(cancellationToken);
 
@@ -228,10 +212,4 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
     public Task SetVolumeAsync(float volume, CancellationToken cancellationToken = default)
         => Task.CompletedTask;
 
-    /// <summary>The copy beside this assembly, not the host's base directory: a plugin runs out of
-    /// its own folder under plugins/.</summary>
-    private static string ShippedExtensionPath => Path.Combine(
-        Path.GetDirectoryName(typeof(SpotifyBreakMusicProvider).Assembly.Location) ?? string.Empty,
-        "extension",
-        SpicetifyInstallation.ExtensionFileName);
 }

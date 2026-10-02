@@ -18,4 +18,17 @@ public static class SpotifyControllerFactory
 
         return new UnsupportedSpotifyController(RuntimeInformation.OSDescription);
     }
+
+    /// <summary>What reaches Spotify's level here. Linux is left unfaded: MPRIS volume is the
+    /// player's own slider, and moving it is moving the host's level.</summary>
+    internal static ISpotifyFader FaderForCurrentPlatform(ILogger logger)
+    {
+        if (OperatingSystem.IsMacOS())
+            return new MacOsSpotifyFader(logger);
+
+        if (OperatingSystem.IsWindows())
+            return new WindowsSpotifyFader(logger, new CoreAudioSpotifySessions(), Task.Delay);
+
+        return new UnavailableSpotifyFader();
+    }
 }
