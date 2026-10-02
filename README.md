@@ -16,31 +16,37 @@ put Spotify on themselves before the first singer is left alone rather than rest
 Windows it is also told when Spotify moves by itself (a track ends, or someone presses pause in
 Spotify's window); Linux has no watch yet, so the host asks.
 
-**Nothing sets Spotify's volume.** Its level is set in Spotify, by whoever is running the room. KHost
+**Spotify's level stays the host's.** It is set in Spotify, by whoever is running the room. KHost
 asks every provider it cannot mix to take the venue level, and this one declines rather than move a
-slider out from under them.
+slider out from under them. Fades only ever take Spotify down from wherever it was found and back to
+that same level (see below).
 
 Resume starts the playlist instead when Spotify has **no track loaded**. A freshly launched Spotify
 reports itself paused with nothing to resume, and accepts a resume that then plays nothing.
 
-## Fading, and the Spicetify bridge
+## Fading
 
-KHost asks for a two second fade before it loads a song, and waits on it. This plugin ignores that
-fade: ramping Spotify's volume from outside meant a process per step, which measured nearly five
-seconds of dead air with the singer stood there.
+Pause, resume and stop fade over the plugin's own fade length, and a start comes up from silence.
+KHost's own two second fade hint is ignored in favour of that setting. The fade moves Spotify's level
+from outside the app:
 
-Fading comes instead from a small [Spicetify](https://spicetify.app) extension,
-`extension/khost-bridge.js`, which ships in the plugin's zip and talks to it over a loopback socket.
-With it, pause, resume and stop fade over the plugin's own fade length. Without it break music still
-plays, but it starts and stops at full level, and the Plugins page says so.
+- **macOS**: Spotify's AppleScript `sound volume`, with the whole ramp done in one `osascript` run.
+  Spotify loses a point on most writes (writing 50 reads back 49), so the last write tries the
+  target's neighbours and keeps whichever reads back closest.
+- **Windows**: Spotify's own rows in the Windows volume mixer, on every active output, through Core
+  Audio. The level put back is the exact one found.
+- **Linux**: no fading. Break music starts and stops at full level, and the Plugins page says so.
 
-Setup is automatic once Spicetify itself is installed: at startup the plugin copies the extension in
-and applies it. Applying restarts Spotify, so it is only ever done while Spotify is **not playing**;
-otherwise the Plugins page asks for Spotify to be closed and KHost restarted. If the extension goes
-missing or will not attach, the Plugins page names the fix (usually `spicetify backup apply`).
+A fade never picks a level of its own. If the host moves Spotify's slider while it is playing, the
+next fade comes back to that level; if they move it while break music is faded out, their level is
+kept rather than overwritten. A fade that cannot reach Spotify's level lets the command through
+unfaded, and the console says so once.
 
-The extension can also nudge Spotify when it finishes a track without starting the next, a stall
-Spotify is prone to.
+The plugin also nudges Spotify when it ends a track without starting the next, a stall Spotify is
+prone to: when playback stops near the end of a track, or sits at 0:00 just after a track change, and
+the host did not ask for it, it presses play, then skips if play did not take. That is at most twice
+a minute. It needs a backend that is told when Spotify moves, so it does nothing on Linux, and it
+cannot see Spotify's queue, so a playlist that genuinely ran out is nudged as well.
 
 ## Settings
 
@@ -49,10 +55,8 @@ Spotify is prone to.
 | Break music | Playlist | blank | A Spotify link or URI. Blank resumes whatever Spotify already has loaded. |
 | Break music | Shuffle the playlist | on | Left to Spotify's own setting on Windows. |
 | Break music | Launch Spotify if it is not already running | on | |
-| Spicetify bridge | Listen for the KHost Spicetify extension | on | Off means no fading, and no setup. |
-| Spicetify bridge | Port the extension connects on | 8974 | Loopback only. |
-| Spicetify bridge | Fade length in milliseconds | 1500 | 0 turns fading off. |
-| Bug fixes | Nudge Spotify when it ends a track without starting the next | on | Needs the extension. |
+| Break music | Fade length in milliseconds | 1500 | 0 turns fading off. |
+| Bug fixes | Nudge Spotify when it ends a track without starting the next | on | macOS and Windows only. |
 
 The Playlist field takes what "Copy link to playlist" puts on the clipboard
 (`https://open.spotify.com/playlist/…?si=…`) as well as the `spotify:playlist:…` form; the `si`
@@ -69,6 +73,7 @@ on the Plugins page, and the bed falls back to resuming whatever Spotify has loa
 | Skip | yes | yes | yes |
 | Reads state and track back | yes | yes | yes |
 | Told when Spotify moves by itself | yes | yes | no, asked |
+| Fades | yes | yes | no |
 | Choose the playlist | yes | via the `spotify:` URI, see below | yes |
 | Shuffle | yes | left to Spotify's own setting | yes |
 | Release zip | portable | `-win` | portable |
@@ -104,7 +109,8 @@ nothing back.
 dependency, since a plugin's dependencies get copied into the host's plugin folder and glib ships
 `gdbus` on any desktop that has Spotify.
 
-The Plugins page states a backend's limitation once at startup; macOS and Linux have none to state.
+The Plugins page states a backend's limitation once at startup; macOS has none to state, and Linux
+states that it does not fade.
 
 ## Building
 
@@ -130,6 +136,5 @@ offers the `-win` zip on Windows and the portable one elsewhere.
 
 By hand: unzip the release that matches the machine into its own folder under KHost's `plugins/`
 directory, enable it on KHost's Plugins page, and restart KHost. The zip carries `manifest.json`,
-the entry dll, its `.deps.json` and `extension/khost-bridge.js` (plus the two WinRT dlls in the
-`-win` zip), and never a copy of the KHost contract assemblies. Then pick **Spotify** as the venue's
+the entry dll and its `.deps.json` (plus the two WinRT dlls in the `-win` zip), and never a copy of the KHost contract assemblies. Then pick **Spotify** as the venue's
 break-music mode.

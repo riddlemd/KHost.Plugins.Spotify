@@ -11,18 +11,11 @@ public class SpotifySettings
 
     public bool LaunchIfNotRunning { get; set; } = true;
 
-    /// <summary>Harmless with no Spicetify extension installed: the socket sits idle and every
-    /// command takes the ordinary path instead of a smooth ramp.</summary>
-    public bool SpicetifyBridge { get; set; } = true;
-
-    /// <summary>Loopback only. The extension reads the same number from its own storage key.</summary>
-    public int SpicetifyBridgePort { get; set; } = 8974;
-
-    /// <summary>Milliseconds. Zero turns fading off while leaving the bridge itself up.</summary>
+    /// <summary>Milliseconds. Zero turns fading off, and Spotify's level is then never touched.</summary>
     public int FadeMilliseconds { get; set; } = 1500;
 
-    /// <summary>Works around Spotify ending a track without starting the next: the extension
-    /// presses play, then skips, when a track stops at its own end with something still queued.
-    /// Needs the bridge, since only the extension is inside the client to see it.</summary>
+    /// <summary>Works around Spotify ending a track without starting the next: presses play, then
+    /// skips, when a track stops at its own end with nobody asking. Needs a backend that is told
+    /// when Spotify moves, so it does nothing on Linux.</summary>
     public bool RecoverStalledPlayback { get; set; } = true;
 }
