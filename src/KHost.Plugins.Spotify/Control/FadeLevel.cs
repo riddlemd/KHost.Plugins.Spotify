@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+
 namespace KHost.Plugins.Spotify.Control;
 
 /// <summary>The level a fade comes back to, and the level this end last wrote. A reading that is
@@ -31,6 +33,15 @@ internal sealed class FadeLevel(double tolerance)
     {
         Target = reading;
         NoteLanded(reading);
+    }
+
+    /// <summary>A level a fade before this process, or before this Spotify, never put back. Every
+    /// reading counts as ours until it lands, so the record wins over whatever Spotify was left at.</summary>
+    public void AwaitRestore(double target, double ceiling)
+    {
+        Target = target;
+        _low = 0;
+        _high = ceiling;
     }
 
     public void NoteLanded(double reading)
@@ -68,6 +79,16 @@ internal abstract class SupersedingFader : ISpotifyFader
     private readonly SemaphoreSlim _gate = new(1, 1);
     private CancellationTokenSource? _current;
 
+    protected SupersedingFader(ILogger logger, IPendingFadeLevels? pending)
+    {
+        Logger = logger;
+        Pending = pending ?? new NoPendingFadeLevels();
+    }
+
+    protected ILogger Logger { get; }
+
+    private IPendingFadeLevels Pending { get; }
+
     public abstract bool IsAvailable { get; }
 
     public Task<FadeOutcome> SilenceAsync(TimeSpan duration, CancellationToken cancellationToken = default)
@@ -77,7 +98,10 @@ internal abstract class SupersedingFader : ISpotifyFader
         => RunAsync(silence: false, duration, cancellationToken);
 
     public Task<FadeOutcome> RestoreOnceQuietAsync(CancellationToken cancellationToken = default)
-        => RunAsync(silence: false, TimeSpan.Zero, cancellationToken, waitForQuiet: true);
+        => RunAsync(silence: false, TimeSpan.Zero, cancellationToken, wait: WaitForQuietAsync);
+
+    public Task<FadeOutcome> RestoreOnceHeardAsync(TimeSpan duration, CancellationToken cancellationToken = default)
+        => RunAsync(silence: false, duration, cancellationToken, wait: WaitForSoundAsync);
 
     /// <summary>Throws <see cref="OperationCanceledException"/> when superseded or cancelled.</summary>
     protected abstract Task<FadeOutcome> FadeAsync(bool silence, TimeSpan duration, CancellationToken cancellationToken);
@@ -86,8 +110,57 @@ internal abstract class SupersedingFader : ISpotifyFader
     /// newer fade supersedes the wait as well as the restore behind it.</summary>
     protected virtual Task WaitForQuietAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
+    /// <summary>Returns once Spotify has a level to set, or straight away where it always has one.</summary>
+    protected virtual Task WaitForSoundAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    /// <summary>A record that cannot be read is no record: the fade goes on adopting what it finds.</summary>
+    protected IReadOnlyDictionary<string, double> ReadPending()
+    {
+        try
+        {
+            return Pending.Read();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Could not read the Spotify level saved before an earlier fade");
+            return new Dictionary<string, double>();
+        }
+    }
+
+    /// <summary>Sets <paramref name="saved"/> and drops <paramref name="cleared"/>, writing only when
+    /// that changes the record, since a write sits in front of every fade out.</summary>
+    /// <remarks>A failed write costs only the protection against a restart: the fade still runs.</remarks>
+    protected void UpdatePending(IReadOnlyDictionary<string, double> saved, IEnumerable<string> cleared)
+    {
+        try
+        {
+            var record = Pending.Read().ToDictionary(StringComparer.Ordinal);
+            var changed = false;
+
+            foreach (var key in cleared)
+                changed |= record.Remove(key);
+
+            foreach (var (key, level) in saved)
+            {
+                if (!record.TryGetValue(key, out var existing) || existing != level)
+                {
+                    record[key] = level;
+                    changed = true;
+                }
+            }
+
+            if (changed)
+                Pending.Write(record);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Could not save Spotify's level before a fade; a restart mid-fade may leave it low");
+        }
+    }
+
     private async Task<FadeOutcome> RunAsync(
-        bool silence, TimeSpan duration, CancellationToken cancellationToken, bool waitForQuiet = false)
+        bool silence, TimeSpan duration, CancellationToken cancellationToken,
+        Func<CancellationToken, Task>? wait = null)
     {
         var mine = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
@@ -102,8 +175,8 @@ internal abstract class SupersedingFader : ISpotifyFader
         {
             mine.Token.ThrowIfCancellationRequested();
 
-            if (waitForQuiet)
-                await WaitForQuietAsync(mine.Token);
+            if (wait is not null)
+                await wait(mine.Token);
 
             return await FadeAsync(silence, duration < TimeSpan.Zero ? TimeSpan.Zero : duration, mine.Token);
         }

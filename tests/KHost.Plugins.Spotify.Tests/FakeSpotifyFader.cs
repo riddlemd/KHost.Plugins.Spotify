@@ -31,5 +31,11 @@ internal sealed class FakeSpotifyFader(List<string> calls) : ISpotifyFader
         return Task.FromResult(Next());
     }
 
+    public Task<FadeOutcome> RestoreOnceHeardAsync(TimeSpan duration, CancellationToken cancellationToken = default)
+    {
+        calls.Add($"restore once heard {duration.TotalMilliseconds:0}");
+        return Task.FromResult(Next());
+    }
+
     private FadeOutcome Next() => Outcomes.Count > 0 ? Outcomes.Dequeue() : Outcome;
 }

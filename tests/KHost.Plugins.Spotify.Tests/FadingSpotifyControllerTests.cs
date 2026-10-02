@@ -121,6 +121,43 @@ public class FadingSpotifyControllerTests
         Assert.Equal(["skip"], _inner.Calls);
     }
 
+    // Nothing to silence is how a relaunched Spotify looks: it may be back at a level an
+    // unfinished fade left, which only the fader can tell.
+    [Fact]
+    public async Task StartAsync_SpotifyHadNoAudioOpen_BringsBackAnyLevelOwedOnceItIsHeard()
+    {
+        _fader.Outcomes.Enqueue(FadeOutcome.NothingToFade);
+
+        Assert.True(await Build().StartAsync(null, shuffle: false));
+
+        Assert.Equal(["silence 0", "start", "restore once heard 1500"], _inner.Calls);
+    }
+
+    [Fact]
+    public async Task ResumeAsync_SpotifyHadNoAudioOpen_BringsBackAnyLevelOwedOnceItIsHeard()
+    {
+        _fader.Outcomes.Enqueue(FadeOutcome.NothingToFade);
+
+        await Build().ResumeAsync();
+
+        Assert.Equal(["silence 0", "resume", "restore once heard 1500"], _inner.Calls);
+    }
+
+    // A level brought back that way is up, so a skip after it is a plain skip.
+    [Fact]
+    public async Task SkipAsync_AfterALevelOwedWasBroughtBack_IsAPlainSkip()
+    {
+        var controller = Build();
+        await controller.PauseAsync();
+        _fader.Outcomes.Enqueue(FadeOutcome.NothingToFade);
+        await controller.ResumeAsync();
+        _inner.Calls.Clear();
+
+        await controller.SkipAsync();
+
+        Assert.Equal(["skip"], _inner.Calls);
+    }
+
     // ── a fader that fails, or is not there, costs the fade and nothing else ────────────
 
     [Fact]

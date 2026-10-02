@@ -29,6 +29,11 @@ internal interface ISpotifyFader
     /// <remarks>A stop command returns before Spotify's last buffer has played, and that buffer
     /// put back at full level is heard as a burst at the end of the fade.</remarks>
     Task<FadeOutcome> RestoreOnceQuietAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Brings back a level an unfinished fade left behind, once Spotify has opened its audio.</summary>
+    /// <remarks>For a command that found nothing to silence: a Spotify relaunched after being killed
+    /// mid-fade comes back at the faded level, and nothing else would raise it.</remarks>
+    Task<FadeOutcome> RestoreOnceHeardAsync(TimeSpan duration, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Where Spotify's level cannot be reached: every command goes through unfaded.</summary>
@@ -43,5 +48,8 @@ internal sealed class UnavailableSpotifyFader : ISpotifyFader
         => Task.FromResult(FadeOutcome.Failed);
 
     public Task<FadeOutcome> RestoreOnceQuietAsync(CancellationToken cancellationToken = default)
+        => Task.FromResult(FadeOutcome.Failed);
+
+    public Task<FadeOutcome> RestoreOnceHeardAsync(TimeSpan duration, CancellationToken cancellationToken = default)
         => Task.FromResult(FadeOutcome.Failed);
 }

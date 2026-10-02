@@ -23,11 +23,13 @@ public static class SpotifyControllerFactory
     /// player's own slider, and moving it is moving the host's level.</summary>
     internal static ISpotifyFader FaderForCurrentPlatform(ILogger logger)
     {
+        var pending = PendingFadeLevelFile.ForThisUser();
+
         if (OperatingSystem.IsMacOS())
-            return new MacOsSpotifyFader(logger);
+            return new MacOsSpotifyFader(logger, pending);
 
         if (OperatingSystem.IsWindows())
-            return new WindowsSpotifyFader(logger, new CoreAudioSpotifySessions(), Task.Delay);
+            return new WindowsSpotifyFader(logger, new CoreAudioSpotifySessions(), Task.Delay, pending);
 
         return new UnavailableSpotifyFader();
     }

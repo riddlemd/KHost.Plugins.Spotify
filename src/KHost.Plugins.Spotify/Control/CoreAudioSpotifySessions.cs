@@ -101,8 +101,9 @@ internal sealed class CoreAudioSpotifySessions : ISpotifyAudioSessions
                             continue;
 
                         control2.GetSessionInstanceIdentifier(out var id);
+                        control2.GetSessionIdentifier(out var levelKey);
 
-                        found.Add(new Session(id, (ISimpleAudioVolume)control, control));
+                        found.Add(new Session(id, levelKey, (ISimpleAudioVolume)control, control));
                         keep = true;
                     }
                     finally
@@ -138,9 +139,11 @@ internal sealed class CoreAudioSpotifySessions : ISpotifyAudioSessions
         }
     }
 
-    private sealed class Session(string id, ISimpleAudioVolume volume, object comObject) : ISpotifyAudioSession
+    private sealed class Session(string id, string levelKey, ISimpleAudioVolume volume, object comObject) : ISpotifyAudioSession
     {
         public string Id { get; } = id;
+
+        public string LevelKey { get; } = levelKey;
 
         public float Volume
         {
