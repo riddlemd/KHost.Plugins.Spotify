@@ -337,7 +337,7 @@ public class SpotifyBreakMusicProviderTests
 
         await provider.StopAsync(TimeSpan.FromSeconds(2));
 
-        Assert.Equal(["silence 1200", "stop", "restore 0"], _controller.Calls);
+        Assert.Equal(["silence 1200", "stop", "restore once quiet"], _controller.Calls);
     }
 
     [Fact]

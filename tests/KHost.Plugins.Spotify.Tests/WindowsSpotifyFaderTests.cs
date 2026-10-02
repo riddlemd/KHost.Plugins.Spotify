@@ -205,6 +205,70 @@ public class WindowsSpotifyFaderTests
         Assert.Equal(1, spotify.Disposed);
     }
 
+    // Spotify's last buffer still plays after a stop; put back at full level it is a burst.
+    [Fact]
+    public async Task RestoreOnceQuietAsync_WaitsForSpotifyToGoQuietThenPutsTheLevelBackAtOnce()
+    {
+        var spotify = Session("a", 0.5f);
+        var fader = Build();
+
+        await fader.SilenceAsync(Fade);
+        spotify.Writes.Clear();
+        _waits.Clear();
+        spotify.ActiveReads = 3;
+
+        Assert.Equal(FadeOutcome.Landed, await fader.RestoreOnceQuietAsync());
+
+        Assert.Equal([0.5f], spotify.Writes);
+        Assert.False(spotify.WroteWhileActive);
+        Assert.Equal(3, _waits.Count);
+    }
+
+    [Fact]
+    public async Task RestoreOnceQuietAsync_ASpotifyThatNeverGoesQuiet_IsPutBackAfterTwoSeconds()
+    {
+        var spotify = Session("a", 0.5f);
+        var fader = Build();
+
+        await fader.SilenceAsync(Fade);
+        _waits.Clear();
+        spotify.ActiveForever = true;
+
+        Assert.Equal(FadeOutcome.Landed, await fader.RestoreOnceQuietAsync());
+
+        Assert.Equal(0.5f, spotify.Volume);
+        Assert.Equal(TimeSpan.FromSeconds(2), _waits.Aggregate(TimeSpan.Zero, (total, wait) => total + wait));
+    }
+
+    // The wait sits inside the gate, so a fade asked for meanwhile cuts it short, and the level
+    // it was waiting to put back never lands over the newer fade.
+    [Fact]
+    public async Task RestoreOnceQuietAsync_ANewerFadeDuringTheWait_SupersedesIt()
+    {
+        var spotify = Session("a", 0.5f);
+        var fader = Build();
+        var waiting = new TaskCompletionSource();
+
+        await fader.SilenceAsync(Fade);
+        spotify.ActiveForever = true;
+
+        _delay = (_, token) =>
+        {
+            waiting.TrySetResult();
+            return Task.Delay(Timeout.Infinite, token);
+        };
+
+        var restore = fader.RestoreOnceQuietAsync();
+        await waiting.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        _delay = null;
+
+        // Bounded, since a wait the newer fade cannot cut short holds the gate for good.
+        await fader.SilenceAsync(TimeSpan.Zero).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(FadeOutcome.Superseded, await restore.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(0f, spotify.Volume);
+    }
+
     private sealed class FakeSessions(WindowsSpotifyFaderTests test) : ISpotifyAudioSessions
     {
         public IReadOnlyList<ISpotifyAudioSession> Open()
@@ -224,6 +288,13 @@ public class WindowsSpotifyFaderTests
 
         public int Disposed { get; private set; }
 
+        /// <summary>How many more reads of <see cref="IsActive"/> answer true.</summary>
+        public int ActiveReads { get; set; }
+
+        public bool ActiveForever { get; set; }
+
+        public bool WroteWhileActive { get; private set; }
+
         public string Id { get; } = id;
 
         public float Volume
@@ -232,7 +303,23 @@ public class WindowsSpotifyFaderTests
             set
             {
                 Writes.Add(value);
+                WroteWhileActive |= ActiveForever || ActiveReads > 0;
                 _volume = value;
+            }
+        }
+
+        public bool IsActive
+        {
+            get
+            {
+                if (ActiveForever)
+                    return true;
+
+                if (ActiveReads == 0)
+                    return false;
+
+                ActiveReads--;
+                return true;
             }
         }
 

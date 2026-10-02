@@ -58,14 +58,14 @@ public class FadingSpotifyControllerTests
         Assert.Equal(["silence 0", "resume", "restore 1500"], _inner.Calls);
     }
 
-    // The way back is bookkeeping over a stopped Spotify, so it is instant, but it has to happen
-    // or Spotify is left muted for whoever reaches for it next.
+    // The way back has to happen or Spotify is left muted for whoever reaches for it next, but
+    // only once its last buffer has played, or that buffer is heard at full level.
     [Fact]
-    public async Task StopAsync_FadesOutStopsThenPutsTheLevelBack()
+    public async Task StopAsync_FadesOutStopsThenPutsTheLevelBackOnceQuiet()
     {
         await Build().StopAsync();
 
-        Assert.Equal(["silence 1500", "stop", "restore 0"], _inner.Calls);
+        Assert.Equal(["silence 1500", "stop", "restore once quiet"], _inner.Calls);
     }
 
     [Fact]

@@ -12,6 +12,10 @@ internal interface ISpotifyAudioSession : IDisposable
 
     /// <summary>The mixer's 0 to 1 level for this session alone, independent of the device's.</summary>
     float Volume { get; set; }
+
+    /// <summary>Whether Spotify is still sending this session sound; it goes inactive a beat after a
+    /// pause or stop, once its last buffer has gone out.</summary>
+    bool IsActive { get; }
 }
 
 /// <summary>Spotify's sessions on every active output, found afresh for each fade.</summary>
@@ -26,6 +30,12 @@ internal interface ISpotifyAudioSessions
 internal sealed class WindowsSpotifyFader : SupersedingFader
 {
     private const int Steps = 30;
+
+    private static readonly TimeSpan QuietPoll = TimeSpan.FromMilliseconds(25);
+
+    /// <summary>Measured at ~250ms after a stop. A Spotify that never goes quiet must not leave the
+    /// level down for ever, so the wait is capped.</summary>
+    private static readonly TimeSpan QuietLimit = TimeSpan.FromSeconds(2);
 
     /// <summary>Loose enough for float noise, tight enough that a host's nudge of the mixer reads as theirs.</summary>
     private const double Tolerance = 0.005;
@@ -117,6 +127,48 @@ internal sealed class WindowsSpotifyFader : SupersedingFader
         {
             _logger.LogWarning(ex, "Could not fade Spotify in the Windows volume mixer");
             return FadeOutcome.Failed;
+        }
+        finally
+        {
+            foreach (var session in sessions)
+                session.Dispose();
+        }
+    }
+
+    protected override async Task WaitForQuietAsync(CancellationToken cancellationToken)
+    {
+        for (var waited = TimeSpan.Zero; waited < QuietLimit; waited += QuietPoll)
+        {
+            if (!AnySessionActive())
+                return;
+
+            await _delay(QuietPoll, cancellationToken);
+        }
+
+        _logger.LogDebug("Spotify still had sound after {Limit}; putting its level back anyway", QuietLimit);
+    }
+
+    /// <summary>A mixer that cannot be read counts as quiet: the restore behind it reports the fault.</summary>
+    private bool AnySessionActive()
+    {
+        IReadOnlyList<ISpotifyAudioSession> sessions;
+
+        try
+        {
+            sessions = _sessions.Open();
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+
+        try
+        {
+            return sessions.Any(session => session.IsActive);
+        }
+        catch (Exception)
+        {
+            return false;
         }
         finally
         {

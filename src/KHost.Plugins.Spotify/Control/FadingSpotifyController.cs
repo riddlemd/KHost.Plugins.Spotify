@@ -99,8 +99,8 @@ internal sealed class FadingSpotifyController : ISpotifyController
 
         await _inner.StopAsync(cancellationToken);
 
-        if (faded)
-            await RestoreAsync(TimeSpan.Zero, cancellationToken);
+        if (faded && CanFade && Note(await _fader.RestoreOnceQuietAsync(cancellationToken)))
+            _silenced = false;
     }
 
     /// <summary>Not faded while the music is up: a skip is meant to be heard as one. Out of a fade

@@ -76,10 +76,18 @@ internal abstract class SupersedingFader : ISpotifyFader
     public Task<FadeOutcome> RestoreAsync(TimeSpan duration, CancellationToken cancellationToken = default)
         => RunAsync(silence: false, duration, cancellationToken);
 
+    public Task<FadeOutcome> RestoreOnceQuietAsync(CancellationToken cancellationToken = default)
+        => RunAsync(silence: false, TimeSpan.Zero, cancellationToken, waitForQuiet: true);
+
     /// <summary>Throws <see cref="OperationCanceledException"/> when superseded or cancelled.</summary>
     protected abstract Task<FadeOutcome> FadeAsync(bool silence, TimeSpan duration, CancellationToken cancellationToken);
 
-    private async Task<FadeOutcome> RunAsync(bool silence, TimeSpan duration, CancellationToken cancellationToken)
+    /// <summary>Returns once Spotify has stopped sending sound. Waited out inside the gate, so a
+    /// newer fade supersedes the wait as well as the restore behind it.</summary>
+    protected virtual Task WaitForQuietAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    private async Task<FadeOutcome> RunAsync(
+        bool silence, TimeSpan duration, CancellationToken cancellationToken, bool waitForQuiet = false)
     {
         var mine = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
@@ -93,6 +101,9 @@ internal abstract class SupersedingFader : ISpotifyFader
         try
         {
             mine.Token.ThrowIfCancellationRequested();
+
+            if (waitForQuiet)
+                await WaitForQuietAsync(mine.Token);
 
             return await FadeAsync(silence, duration < TimeSpan.Zero ? TimeSpan.Zero : duration, mine.Token);
         }
