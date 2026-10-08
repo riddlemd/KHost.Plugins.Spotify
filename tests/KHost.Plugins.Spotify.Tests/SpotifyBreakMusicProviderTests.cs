@@ -26,10 +26,6 @@ public class SpotifyBreakMusicProviderTests
             NullLogger<SpotifyBreakMusicProvider>.Instance, _context, _controller, broker: null, _flash, fader, time);
     }
 
-    [Fact]
-    public void RendersThroughHost_IsFalse_BecauseTheSoundLeavesSpotifysOwnOutput()
-        => Assert.False(Build().RendersThroughHost);
-
     // A property cannot go and ask, so it stays empty until a command has been through.
     [Fact]
     public void CurrentTrack_BeforeAnyCommand_IsNull()

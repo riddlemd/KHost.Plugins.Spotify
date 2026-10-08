@@ -4,9 +4,9 @@ Break-music provider for [KHost](https://github.com/riddlemd/KHost). Puts the Sp
 between singers, and takes it off again when one starts.
 
 This plugin **drives Spotify; it does not carry its audio**. The sound comes out of Spotify's own
-output, where the host cannot route it, mix it, or send it to a Cast device — so
-`RendersThroughHost` is false. There is no API key, no OAuth, and no Spotify Premium requirement:
-everything goes through the app already running on the machine.
+output, where the host cannot route it, mix it, or send it to a Cast device. There is no API key,
+no OAuth, and no Spotify Premium requirement: everything goes through the app already running on
+the machine.
 
 ## What it does, and what it deliberately does not
 
@@ -114,7 +114,7 @@ states that it does not fade.
 
 ## Building
 
-The plugin builds against the published contracts, `KHost.Abstractions` and `KHost.Common` 0.30.0,
+The plugin builds against the published contracts, `KHost.Abstractions` and `KHost.Common` 0.51.0,
 as NuGet packages. Until they are on nuget.org they come from the local feed KHost's
 `./build/pack-contracts.sh` fills (see KHost's AGENTS.md, **The published contracts**).
 

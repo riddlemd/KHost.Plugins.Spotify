@@ -108,8 +108,6 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
 
     public string SourceName => nameof(SpotifyBreakMusicProvider);
 
-    public bool RendersThroughHost => false;
-
     /// <summary>A property cannot go and ask, so this is refreshed by the transport calls rather
     /// than polled, naming what is on without putting a timer on Spotify for a whole shift.</summary>
     public BreakMusicTrack? CurrentTrack { get; private set; }
