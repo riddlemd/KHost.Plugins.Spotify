@@ -120,7 +120,7 @@ does not fade.
 
 ## Building
 
-The plugin builds against the published contracts, `KHost.Abstractions` and `KHost.Common` 0.51.0,
+The plugin builds against the published contracts, `KHost.Abstractions` and `KHost.Common` 0.53.0,
 as NuGet packages. Until they are on nuget.org they come from the local feed KHost's
 `./build/pack-contracts.sh` fills (see KHost's AGENTS.md, **The published contracts**).
 
