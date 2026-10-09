@@ -13,8 +13,9 @@ the machine.
 It sends five commands and no more: start, pause, resume, stop and skip. It **reads Spotify's
 state back** — playing or paused, and the track — so the console names what is on, and a host who
 put Spotify on themselves before the first singer is left alone rather than restarted. On macOS and
-Windows it is also told when Spotify moves by itself (a track ends, or someone presses pause in
-Spotify's window); Linux has no watch yet, so the host asks.
+Windows it also notices when Spotify moves by itself (a track ends, or someone presses pause in
+Spotify's window): macOS by checking every few seconds, Windows through the media session. Linux
+has no watch yet, so the host asks.
 
 **Spotify's level stays the host's.** It is set in Spotify, by whoever is running the room. KHost
 asks every provider it cannot mix to take the venue level, and this one declines rather than move a
@@ -50,7 +51,7 @@ unfaded, and the console says so once.
 The plugin also nudges Spotify when it ends a track without starting the next, a stall Spotify is
 prone to: when playback stops near the end of a track, or sits at 0:00 just after a track change, and
 the host did not ask for it, it presses play, then skips if play did not take. That is at most twice
-a minute. It needs a backend that is told when Spotify moves, so it does nothing on Linux, and it
+a minute. It needs a backend that notices when Spotify moves, so it does nothing on Linux, and it
 cannot see Spotify's queue, so a playlist that genuinely ran out is nudged as well.
 
 ## Settings
@@ -100,9 +101,10 @@ means another player holding media focus does not get in the way. That row appea
 Spotify has played something; until then the global media keys are the fallback, and they reach
 whichever app owns media focus. This is the one limitation the log states for Windows.
 
-Loading a playlist on Windows means opening its `spotify:` URI. That shows the playlist in Spotify,
-but whether playback moves to it is Spotify's call: with a track already loaded, Spotify has been
-seen to resume that track instead.
+Loading a playlist on Windows means opening its `spotify:` URI, waiting five seconds, then asking
+Spotify whether it is playing and pressing play only if it is not. Whether playback moves to the
+playlist is still Spotify's call: with a track already loaded, Spotify has been seen to resume that
+track instead.
 
 The media session needs the WinRT projection, which the host does not carry, so the Windows build
 ships as its own `-win` zip with `Microsoft.Windows.SDK.NET.dll` and `WinRT.Runtime.dll` beside the
@@ -134,10 +136,14 @@ session.
 
 ## Installing
 
-From a KHost host: **Plugins → Available**, once the release is in the plugin catalog. The catalog
-offers the `-win` zip on Windows and the portable one elsewhere.
+From a KHost host: **Plugins → Available**. The catalog (`plugins.json` in
+[riddlemd/KHost.Releases](https://github.com/riddlemd/KHost.Releases)) offers the `-win` zip on
+Windows and the portable one elsewhere. Restart KHost afterwards.
 
 By hand: unzip the release that matches the machine into its own folder under KHost's `plugins/`
 directory, enable it on KHost's Plugins page, and restart KHost. The zip carries `manifest.json`,
-the entry dll and its `.deps.json` (plus the two WinRT dlls in the `-win` zip), and never a copy of the KHost contract assemblies. Then pick **Spotify** as the venue's
-break-music mode.
+the entry dll and its `.deps.json` (plus the two WinRT dlls in the `-win` zip), and never a copy of
+the KHost contract assemblies. Then pick **Spotify** as the venue's break-music mode.
+
+The manifest's `apiVersion` is 1, the plugin API this was built against; a host runs it when that
+lies within the range the host supports.
