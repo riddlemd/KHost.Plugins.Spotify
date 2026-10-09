@@ -142,7 +142,7 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
             _logger.LogWarning("Spotify refused to start break music");
 
             throw new KHostException(
-                "Spotify: couldn't start break music. Check that Spotify is installed and reachable, "
+                "Spotify couldn't be started. Check that Spotify is installed and reachable, "
                 + "then try again.",
                 "Check that Spotify is installed and reachable, then try again.",
                 "KH-SPOTIFY-START-FAILED");
@@ -173,7 +173,7 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
             state.Title, state.Playback);
 
         throw new KHostException(
-            "Spotify: break music did not start. Spotify was asked to play but stayed paused.",
+            "Spotify was asked to play but stayed paused.",
             "Press play in Spotify itself. If it says it can't play this right now, the fault is in "
             + "Spotify or its audio output, not KHost.",
             "KH-SPOTIFY-NOT-PLAYING");

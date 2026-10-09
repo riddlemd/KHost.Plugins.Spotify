@@ -150,7 +150,9 @@ public class SpotifyBreakMusicProviderTests
 
         var ex = await Assert.ThrowsAsync<KHostException>(() => Build().StartAsync());
 
-        Assert.StartsWith("Spotify:", ex.WhatHappened);
+        Assert.Equal(
+            "Spotify couldn't be started. Check that Spotify is installed and reachable, then try again.",
+            ex.WhatHappened);
         Assert.Equal("KH-SPOTIFY-START-FAILED", ex.ReferenceCode);
     }
 
@@ -262,7 +264,7 @@ public class SpotifyBreakMusicProviderTests
         var ex = await Assert.ThrowsAsync<KHostException>(() => Build().StartAsync());
 
         Assert.Equal("KH-SPOTIFY-NOT-PLAYING", ex.ReferenceCode);
-        Assert.StartsWith("Spotify:", ex.WhatHappened);
+        Assert.Equal("Spotify was asked to play but stayed paused.", ex.WhatHappened);
     }
 
     // The refusal reads Playing for about half a second before Paused; a read inside that flicker
