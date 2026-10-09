@@ -4,7 +4,8 @@ namespace KHost.Plugins.Spotify.Control;
 /// room's Spotify volume is set in Spotify.</summary>
 public interface ISpotifyController
 {
-    /// <summary>What this backend cannot do, for the Plugins page to say once at startup.</summary>
+    /// <summary>What this backend cannot do, logged once at startup. Not a host warning: the host
+    /// flashes those, and a standing limitation is nothing a host can act on.</summary>
     string? Limitation { get; }
 
     /// <summary>Raised when Spotify moved without being asked: the host pressed pause in its own

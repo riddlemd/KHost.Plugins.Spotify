@@ -18,7 +18,14 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
     private static readonly TimeSpan SkipSettleInterval = TimeSpan.FromMilliseconds(150);
     private const int SkipSettleAttempts = 10;
 
+    /// <summary>A Spotify that refuses a track reports Playing for about half a second and then
+    /// Paused at 0:00, so the first read is taken past that flicker.</summary>
+    internal static readonly TimeSpan PlayConfirmSettle = TimeSpan.FromMilliseconds(1500);
+    internal static readonly TimeSpan PlayConfirmInterval = TimeSpan.FromMilliseconds(250);
+    internal static readonly TimeSpan PlayConfirmLimit = TimeSpan.FromSeconds(4);
+
     private readonly ILogger<SpotifyBreakMusicProvider> _logger;
+    private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly IMessageBroker? _broker;
     private readonly ISpotifyController _controller;
     private readonly string? _contextUri;
@@ -41,10 +48,12 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
         IMessageBroker? broker = null,
         IFlashService? flash = null,
         ISpotifyFader? fader = null,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        Func<TimeSpan, CancellationToken, Task>? delay = null)
     {
         _logger = logger;
         _broker = broker;
+        _delay = delay ?? Task.Delay;
 
         var settings = context.BindSettings<SpotifySettings>();
 
@@ -74,8 +83,10 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
                 + "music will resume whatever Spotify already has loaded instead.");
         }
 
+        // Logged, not added as a warning: the host flashes every warning, and nothing here is
+        // anything a host can act on, least of all while another provider is selected.
         if (_controller.Limitation is { } limitation)
-            context.AddWarning(limitation);
+            _logger.LogInformation("Spotify break music: {Limitation}", limitation);
 
         // Relayed onto the broker, which is how the SDK says a provider reports moving on its own.
         // The host re-reads on it, so this carries no payload of its own.
@@ -137,11 +148,51 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
                 "KH-SPOTIFY-START-FAILED");
         }
 
-        CurrentTrack = ToTrack(await _controller.GetStateAsync(cancellationToken));
+        await ConfirmPlayingAsync(cancellationToken);
 
         _logger.LogInformation("Break music playing from Spotify");
 
         return true;
+    }
+
+    /// <summary>Spotify accepts play from every route, its own button included, and then pauses
+    /// at 0:00 when it cannot play the track; without this the console shows Playing over silence.</summary>
+    /// <exception cref="KHostException">Spotify is readable and did not stay playing.</exception>
+    private async Task ConfirmPlayingAsync(CancellationToken cancellationToken)
+    {
+        var state = await ReadAfterPlayAsync(cancellationToken);
+
+        CurrentTrack = ToTrack(state) ?? CurrentTrack;
+
+        // Unreadable is not refused: a backend that cannot see has nothing to confirm with.
+        if (state is null || state.Playback == SpotifyPlayback.Playing)
+            return;
+
+        _logger.LogWarning(
+            "Spotify was asked to play {Title} but is {Playback}; Spotify itself is not playing it",
+            state.Title, state.Playback);
+
+        throw new KHostException(
+            "Spotify: break music did not start. Spotify was asked to play but stayed paused.",
+            "Press play in Spotify itself. If it says it can't play this right now, the fault is in "
+            + "Spotify or its audio output, not KHost.",
+            "KH-SPOTIFY-NOT-PLAYING");
+    }
+
+    /// <summary>The first Playing read past the settle, or the last read once the limit passes.</summary>
+    private async Task<SpotifyState?> ReadAfterPlayAsync(CancellationToken cancellationToken)
+    {
+        await _delay(PlayConfirmSettle, cancellationToken);
+
+        for (var waited = PlayConfirmSettle; ; waited += PlayConfirmInterval)
+        {
+            var state = await _controller.GetStateAsync(cancellationToken);
+
+            if (state is null || state.Playback == SpotifyPlayback.Playing || waited >= PlayConfirmLimit)
+                return state;
+
+            await _delay(PlayConfirmInterval, cancellationToken);
+        }
     }
 
     internal static BreakMusicTrack? ToTrack(SpotifyState? state)
@@ -166,6 +217,8 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
         }
 
         await _controller.ResumeAsync(cancellationToken);
+
+        await ConfirmPlayingAsync(cancellationToken);
     }
 
     /// <summary><paramref name="fadeDuration"/> is ignored: the fade is this plugin's own setting,

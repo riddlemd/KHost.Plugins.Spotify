@@ -11,9 +11,14 @@ namespace KHost.Plugins.Spotify.Tests;
 
 public class SpotifyBreakMusicProviderTests
 {
-    private readonly FakeSpotifyController _controller = new();
+    private readonly FakeSpotifyController _controller = new() { PlaysWhenAsked = true };
     private readonly IPluginContext _context = Substitute.For<IPluginContext>();
     private readonly IFlashService _flash = Substitute.For<IFlashService>();
+    private readonly ListLogger<SpotifyBreakMusicProvider> _log = new();
+
+    /// <summary>Virtual time the provider has waited, so a test can move Spotify along with it.</summary>
+    private TimeSpan _waited;
+    private Action<TimeSpan>? _onWaited;
 
     private SpotifyBreakMusicProvider Build(SpotifySettings? settings = null)
         => Build(settings, fader: null);
@@ -23,7 +28,13 @@ public class SpotifyBreakMusicProviderTests
         _context.BindSettings<SpotifySettings>().Returns(settings ?? new SpotifySettings());
 
         return new SpotifyBreakMusicProvider(
-            NullLogger<SpotifyBreakMusicProvider>.Instance, _context, _controller, broker: null, _flash, fader, time);
+            _log, _context, _controller, broker: null, _flash, fader, time,
+            delay: (span, _) =>
+            {
+                _waited += span;
+                _onWaited?.Invoke(_waited);
+                return Task.CompletedTask;
+            });
     }
 
     // A property cannot go and ask, so it stays empty until a command has been through.
@@ -227,14 +238,86 @@ public class SpotifyBreakMusicProviderTests
         _context.DidNotReceive().AddWarning(Arg.Any<string>());
     }
 
+    // The host flashes every warning, even while another provider is selected, and a backend's
+    // standing limitation is nothing a host can act on.
     [Fact]
-    public void Constructor_TheBackendCannotDoEverything_TellsTheHostOnce()
+    public void Constructor_TheBackendCannotDoEverything_LogsItWithoutWarningTheHost()
     {
         _controller.Limitation = "The media keys reach whichever app owns media focus.";
 
         Build();
 
-        _context.Received(1).AddWarning("The media keys reach whichever app owns media focus.");
+        _context.DidNotReceive().AddWarning(Arg.Any<string>());
+        Assert.Contains(_log.Entries, entry => entry.Message.Contains("The media keys reach whichever app owns media focus."));
+    }
+
+    // Seen live on Windows: Spotify takes play from its session, its media key and its own button,
+    // shows "can't play this right now", and sits paused at 0:00.
+    [Fact]
+    public async Task StartAsync_SpotifyAcceptsPlayButStaysPaused_ThrowsSoTheConsoleDoesNotShowPlaying()
+    {
+        _controller.PlaysWhenAsked = false;
+        _controller.State = new SpotifyState(SpotifyPlayback.Paused, "Goth", "Lebanon Hanover", 0, 207000);
+
+        var ex = await Assert.ThrowsAsync<KHostException>(() => Build().StartAsync());
+
+        Assert.Equal("KH-SPOTIFY-NOT-PLAYING", ex.ReferenceCode);
+        Assert.StartsWith("Spotify:", ex.WhatHappened);
+    }
+
+    // The refusal reads Playing for about half a second before Paused; a read inside that flicker
+    // would report success over silence.
+    [Fact]
+    public async Task StartAsync_SpotifyFlickersToPlayingThenPauses_ThrowsAnyway()
+    {
+        _controller.State = new SpotifyState(SpotifyPlayback.Paused, "Goth");
+        _onWaited = waited =>
+        {
+            if (waited >= TimeSpan.FromMilliseconds(600))
+                _controller.State = new SpotifyState(SpotifyPlayback.Paused, "Goth");
+        };
+
+        await Assert.ThrowsAsync<KHostException>(() => Build().StartAsync());
+    }
+
+    [Fact]
+    public async Task StartAsync_SpotifyTakesAFewSecondsToPlay_WaitsForItAndSucceeds()
+    {
+        _controller.PlaysWhenAsked = false;
+        _controller.State = new SpotifyState(SpotifyPlayback.Paused, "Goth");
+        _onWaited = waited =>
+        {
+            if (waited >= TimeSpan.FromSeconds(3))
+                _controller.State = new SpotifyState(SpotifyPlayback.Playing, "Goth");
+        };
+
+        Assert.True(await Build().StartAsync());
+        Assert.Equal(TimeSpan.FromSeconds(3), _waited);
+    }
+
+    // Spotify that never plays must not hold the console past the limit.
+    [Fact]
+    public async Task StartAsync_SpotifyNeverPlays_GivesUpAtTheLimit()
+    {
+        _controller.PlaysWhenAsked = false;
+        _controller.State = new SpotifyState(SpotifyPlayback.Paused, "Goth");
+
+        await Assert.ThrowsAsync<KHostException>(() => Build().StartAsync());
+
+        Assert.Equal(SpotifyBreakMusicProvider.PlayConfirmLimit, _waited);
+    }
+
+    // The host's Play button resumes whenever break music reads as paused, which is the second
+    // press in the smoke test that also left the console silent.
+    [Fact]
+    public async Task ResumeAsync_SpotifyStaysPaused_Throws()
+    {
+        _controller.PlaysWhenAsked = false;
+        _controller.State = new SpotifyState(SpotifyPlayback.Paused, "Goth", "Lebanon Hanover");
+
+        var ex = await Assert.ThrowsAsync<KHostException>(() => Build().ResumeAsync());
+
+        Assert.Equal("KH-SPOTIFY-NOT-PLAYING", ex.ReferenceCode);
     }
 
     [Fact]
@@ -252,7 +335,7 @@ public class SpotifyBreakMusicProviderTests
 
         await Build().ResumeAsync();
 
-        Assert.Equal(["state", "resume"], _controller.Calls);
+        Assert.Equal(["state", "resume", "state"], _controller.Calls);
     }
 
     // A freshly launched Spotify reports paused with no track, and accepts a resume that plays
@@ -277,7 +360,7 @@ public class SpotifyBreakMusicProviderTests
 
         await Build().ResumeAsync();
 
-        Assert.Equal(["state", "resume"], _controller.Calls);
+        Assert.Equal(["state", "resume", "state"], _controller.Calls);
     }
 
     // Reads bracket the skip: one for what it is leaving, one for what it landed on. The point of
