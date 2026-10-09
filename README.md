@@ -24,6 +24,11 @@ that same level (see below).
 Resume starts the playlist instead when Spotify has **no track loaded**. A freshly launched Spotify
 reports itself paused with nothing to resume, and accepts a resume that then plays nothing.
 
+Start and resume **check that Spotify is actually playing** a moment later. Spotify accepts play by
+every route, its own button included, and then sits paused at 0:00 when it cannot play the track
+("Spotify can't play this right now"). The console then says break music did not start, instead of
+showing Playing over silence.
+
 ## Fading
 
 Pause, resume and stop fade over the plugin's own fade length, and a start comes up from silence.
@@ -35,7 +40,7 @@ from outside the app:
   target's neighbours and keeps whichever reads back closest.
 - **Windows**: Spotify's own rows in the Windows volume mixer, on every active output, through Core
   Audio. The level put back is the exact one found.
-- **Linux**: no fading. Break music starts and stops at full level, and the Plugins page says so.
+- **Linux**: no fading. Break music starts and stops at full level, and the log says so.
 
 A fade never picks a level of its own. If the host moves Spotify's slider while it is playing, the
 next fade comes back to that level; if they move it while break music is faded out, their level is
@@ -93,7 +98,7 @@ transport (`Windows.Media.Control`) — the same one the volume flyout shows —
 pause, stop and next, and reads the state and track from it. Picking Spotify's row by its app id
 means another player holding media focus does not get in the way. That row appears only once
 Spotify has played something; until then the global media keys are the fallback, and they reach
-whichever app owns media focus. This is the one limitation the Plugins page states for Windows.
+whichever app owns media focus. This is the one limitation the log states for Windows.
 
 Loading a playlist on Windows means opening its `spotify:` URI. That shows the playlist in Spotify,
 but whether playback moves to it is Spotify's call: with a track already loaded, Spotify has been
@@ -109,8 +114,9 @@ nothing back.
 dependency, since a plugin's dependencies get copied into the host's plugin folder and glib ships
 `gdbus` on any desktop that has Spotify.
 
-The Plugins page states a backend's limitation once at startup; macOS has none to state, and Linux
-states that it does not fade.
+A backend's limitation is logged once at startup, not raised as a warning: KHost flashes every
+warning, and these are nothing a host can act on. macOS has none to state, and Linux states that it
+does not fade.
 
 ## Building
 

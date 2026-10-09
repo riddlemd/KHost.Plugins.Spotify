@@ -46,3 +46,18 @@ internal sealed class ListLogger : ILogger
         LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
         => Entries.Add((logLevel, formatter(state, exception)));
 }
+
+internal sealed class ListLogger<T> : ILogger<T>
+{
+    private readonly ListLogger _inner = new();
+
+    public List<(LogLevel Level, string Message)> Entries => _inner.Entries;
+
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(
+        LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        => _inner.Log(logLevel, eventId, state, exception, formatter);
+}

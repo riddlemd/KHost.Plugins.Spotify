@@ -28,6 +28,16 @@ public sealed class FakeSpotifyController : ISpotifyController
 
     public bool CanStart { get; set; } = true;
 
+    /// <summary>Whether start and resume leave <see cref="State"/> playing. Off by default: the
+    /// stall tests stand up a Spotify on which play does not take.</summary>
+    public bool PlaysWhenAsked { get; set; }
+
+    private void PlayIfAsked()
+    {
+        if (PlaysWhenAsked && State is not null)
+            State = State with { Playback = SpotifyPlayback.Playing };
+    }
+
     public string? StartedContextUri { get; private set; }
     public bool StartedWithShuffle { get; private set; }
 
@@ -52,6 +62,9 @@ public sealed class FakeSpotifyController : ISpotifyController
 
         Calls.Add("start");
 
+        if (CanStart)
+            PlayIfAsked();
+
         return Task.FromResult(CanStart);
     }
 
@@ -64,6 +77,7 @@ public sealed class FakeSpotifyController : ISpotifyController
     public Task ResumeAsync(CancellationToken cancellationToken = default)
     {
         Calls.Add("resume");
+        PlayIfAsked();
         return Task.CompletedTask;
     }
 
