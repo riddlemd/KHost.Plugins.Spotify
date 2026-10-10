@@ -33,8 +33,8 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
 
     public SpotifyBreakMusicProvider(
         ILogger<SpotifyBreakMusicProvider> logger, IPluginContext context, IMessageBroker broker,
-        IFlashService flash)
-        : this(logger, context, controller: null, broker, flash)
+        IFlashService flash, IBreakMusicSettings breakMusic)
+        : this(logger, context, controller: null, broker, flash, breakMusic: breakMusic)
     {
     }
 
@@ -49,7 +49,8 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
         IFlashService? flash = null,
         ISpotifyFader? fader = null,
         TimeProvider? time = null,
-        Func<TimeSpan, CancellationToken, Task>? delay = null)
+        Func<TimeSpan, CancellationToken, Task>? delay = null,
+        IBreakMusicSettings? breakMusic = null)
     {
         _logger = logger;
         _broker = broker;
@@ -68,7 +69,7 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
         if (fader is not null)
         {
             platform = new FadingSpotifyController(
-                platform, fader, TimeSpan.FromMilliseconds(Math.Max(0, settings.FadeMilliseconds)), flash);
+                platform, fader, () => breakMusic?.FadeDuration ?? TimeSpan.Zero, flash);
         }
 
         if (settings.RecoverStalledPlayback)
@@ -221,8 +222,8 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
         await ConfirmPlayingAsync(cancellationToken);
     }
 
-    /// <summary><paramref name="fadeDuration"/> is ignored: the fade is this plugin's own setting,
-    /// and the level is put back once stopped so Spotify is never left muted.</summary>
+    /// <summary><paramref name="fadeDuration"/> is ignored: the fade is KHost's App Setting,
+    /// read live, and the level is put back once stopped so Spotify is never left muted.</summary>
     public Task StopAsync(TimeSpan? fadeDuration = null, CancellationToken cancellationToken = default)
         => _controller.StopAsync(cancellationToken);
 

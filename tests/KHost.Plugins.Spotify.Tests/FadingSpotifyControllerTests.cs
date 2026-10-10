@@ -16,7 +16,25 @@ public class FadingSpotifyControllerTests
     public FadingSpotifyControllerTests() => _fader = new FakeSpotifyFader(_inner.Calls);
 
     private FadingSpotifyController Build(TimeSpan? fade = null)
-        => new(_inner, _fader, fade ?? Fade, _flash);
+        => new(_inner, _fader, () => fade ?? Fade, _flash);
+
+    // The host edits the length while it runs; a copy taken at construction would keep the old one.
+    [Fact]
+    public async Task AFadeLengthChangedAfterConstruction_IsUsedByTheNextFade()
+    {
+        var fade = TimeSpan.FromMilliseconds(400);
+        var controller = new FadingSpotifyController(_inner, _fader, () => fade, _flash);
+
+        await controller.PauseAsync();
+        Assert.Contains("silence 400", _inner.Calls);
+
+        fade = TimeSpan.FromMilliseconds(900);
+        _inner.Calls.Clear();
+        await controller.PauseAsync();
+
+        Assert.Contains("silence 900", _inner.Calls);
+        Assert.DoesNotContain("silence 400", _inner.Calls);
+    }
 
     // ── what each command does with a fader that works ─────────────────────────────────
 
@@ -272,6 +290,15 @@ public class FadingSpotifyControllerTests
 
         Assert.Equal(["start", "pause", "stop"], _inner.Calls);
         Assert.Null(controller.Limitation);
+    }
+
+    // A negative length is treated as off, so an unfadeable platform has nothing to announce.
+    [Fact]
+    public void ANegativeFade_CountsAsOff()
+    {
+        _fader.IsAvailable = false;
+
+        Assert.Null(Build(TimeSpan.FromMilliseconds(-5)).Limitation);
     }
 
     // ── what passes straight through ───────────────────────────────────────────────────

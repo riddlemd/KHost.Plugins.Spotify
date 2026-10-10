@@ -7,12 +7,11 @@
   "description": "Plays break music through the Spotify desktop app on this machine.",
   "icon": "music-note-beamed",
   "entryAssembly": "KHost.Plugins.Spotify.dll",
-  "apiVersion": 1,
+  "apiVersion": 4,
   "settings": [
-    { "key": "playlistUri", "type": "string", "section": "Break music", "label": "Playlist (Spotify link or URI — blank resumes whatever Spotify has loaded)" },
+    { "key": "playlistUri", "type": "string", "section": "Break music", "label": "Playlist", "optional": true, "description": "A Spotify link or URI. Blank resumes whatever Spotify has loaded." },
     { "key": "shuffle", "type": "bool", "section": "Break music", "label": "Shuffle the playlist", "default": true },
     { "key": "launchIfNotRunning", "type": "bool", "section": "Break music", "label": "Launch Spotify if it is not already running", "default": true },
-    { "key": "fadeMilliseconds", "type": "int", "section": "Break music", "label": "Fade length in milliseconds (0 turns fading off)", "default": 1500 },
     { "key": "recoverStalledPlayback", "type": "bool", "section": "Bug Fixes", "label": "Nudge Spotify when it ends a track without starting the next", "default": true }
   ]
 }

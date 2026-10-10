@@ -9,7 +9,7 @@ internal sealed class FadingSpotifyController : ISpotifyController
 {
     private readonly ISpotifyController _inner;
     private readonly ISpotifyFader _fader;
-    private readonly TimeSpan _fade;
+    private readonly Func<TimeSpan> _fade;
     private readonly IFlashService? _flash;
 
     /// <summary>Whether the last fade this end made left Spotify at silence.</summary>
@@ -20,19 +20,22 @@ internal sealed class FadingSpotifyController : ISpotifyController
     private bool _failureFlashed;
 
     public FadingSpotifyController(
-        ISpotifyController inner, ISpotifyFader fader, TimeSpan fade, IFlashService? flash = null)
+        ISpotifyController inner, ISpotifyFader fader, Func<TimeSpan> fade, IFlashService? flash = null)
     {
         _inner = inner;
         _fader = fader;
-        _fade = fade < TimeSpan.Zero ? TimeSpan.Zero : fade;
+        _fade = fade;
         _flash = flash;
 
         _inner.PlaybackChanged += (_, _) => PlaybackChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    /// <summary>Asked each time: the host changes the length while it runs.</summary>
+    private TimeSpan Fade => _fade() is var fade && fade > TimeSpan.Zero ? fade : TimeSpan.Zero;
+
     /// <summary>A platform that cannot fade at all is said once at startup, rather than flashed
     /// at the host on every start.</summary>
-    public string? Limitation => _fader.IsAvailable || _fade == TimeSpan.Zero
+    public string? Limitation => _fader.IsAvailable || Fade == TimeSpan.Zero
         ? _inner.Limitation
         : string.Join(" ", new[]
         {
@@ -43,7 +46,7 @@ internal sealed class FadingSpotifyController : ISpotifyController
     public event EventHandler? PlaybackChanged;
 
     /// <summary>Zero is the host turning fades off, which is not a failure to report.</summary>
-    private bool CanFade => _fader.IsAvailable && _fade > TimeSpan.Zero;
+    private bool CanFade => _fader.IsAvailable && Fade > TimeSpan.Zero;
 
     /// <summary>Also brings back a level an unfinished fade still owes: a KHost closed or killed
     /// mid-fade leaves Spotify low, and it may play on at that level before any command arrives.</summary>
@@ -56,7 +59,7 @@ internal sealed class FadingSpotifyController : ISpotifyController
         finally
         {
             // Not flashed: nobody asked for anything yet, and the first command reports a fault.
-            if (CanFade && await _fader.RestoreOnceHeardAsync(_fade, cancellationToken) == FadeOutcome.Landed)
+            if (CanFade && await _fader.RestoreOnceHeardAsync(Fade, cancellationToken) == FadeOutcome.Landed)
                 _silenced = false;
         }
     }
@@ -87,7 +90,7 @@ internal sealed class FadingSpotifyController : ISpotifyController
 
     public async Task PauseAsync(CancellationToken cancellationToken = default)
     {
-        await SilenceAsync(_fade, cancellationToken);
+        await SilenceAsync(Fade, cancellationToken);
         await _inner.PauseAsync(cancellationToken);
     }
 
@@ -106,7 +109,7 @@ internal sealed class FadingSpotifyController : ISpotifyController
     /// for it next.</summary>
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
-        var faded = await SilenceAsync(_fade, cancellationToken);
+        var faded = await SilenceAsync(Fade, cancellationToken);
 
         await _inner.StopAsync(cancellationToken);
 
@@ -121,7 +124,7 @@ internal sealed class FadingSpotifyController : ISpotifyController
         await _inner.SkipAsync(cancellationToken);
 
         if (_silenced)
-            await RestoreAsync(_fade, cancellationToken);
+            await RestoreAsync(Fade, cancellationToken);
     }
 
     private async Task<bool> SilenceAsync(TimeSpan duration, CancellationToken cancellationToken)
@@ -147,10 +150,10 @@ internal sealed class FadingSpotifyController : ISpotifyController
     {
         if (silence == FadeOutcome.Landed)
         {
-            await RestoreAsync(_fade, cancellationToken);
+            await RestoreAsync(Fade, cancellationToken);
         }
         else if (silence == FadeOutcome.NothingToFade
-            && Note(await _fader.RestoreOnceHeardAsync(_fade, cancellationToken)))
+            && Note(await _fader.RestoreOnceHeardAsync(Fade, cancellationToken)))
         {
             _silenced = false;
         }

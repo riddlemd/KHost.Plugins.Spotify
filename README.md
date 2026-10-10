@@ -32,9 +32,9 @@ showing Playing over silence.
 
 ## Fading
 
-Pause, resume and stop fade over the plugin's own fade length, and a start comes up from silence.
-KHost's own two second fade hint is ignored in favour of that setting. The fade moves Spotify's level
-from outside the app:
+Pause, resume and stop fade over the length set in KHost's App Settings → Break music → Fade, read at
+each fade, and a start comes up from silence. The fade hint KHost passes to stop is the same value.
+The fade moves Spotify's level from outside the app:
 
 - **macOS**: Spotify's AppleScript `sound volume`, with the whole ramp done in one `osascript` run.
   Spotify loses a point on most writes (writing 50 reads back 49), so the last write tries the
@@ -61,7 +61,6 @@ cannot see Spotify's queue, so a playlist that genuinely ran out is nudged as we
 | Break music | Playlist | blank | A Spotify link or URI. Blank resumes whatever Spotify already has loaded. |
 | Break music | Shuffle the playlist | on | Left to Spotify's own setting on Windows. |
 | Break music | Launch Spotify if it is not already running | on | |
-| Break music | Fade length in milliseconds | 1500 | 0 turns fading off. |
 | Bug fixes | Nudge Spotify when it ends a track without starting the next | on | macOS and Windows only. |
 
 The Playlist field takes what "Copy link to playlist" puts on the clipboard
@@ -122,7 +121,7 @@ does not fade.
 
 ## Building
 
-The plugin builds against the published contracts, `KHost.Abstractions` and `KHost.Common` 0.53.0,
+The plugin builds against the published contracts, `KHost.Abstractions` and `KHost.Common` 0.56.0,
 as NuGet packages. Until they are on nuget.org they come from the local feed KHost's
 `./build/pack-contracts.sh` fills (see KHost's AGENTS.md, **The published contracts**).
 

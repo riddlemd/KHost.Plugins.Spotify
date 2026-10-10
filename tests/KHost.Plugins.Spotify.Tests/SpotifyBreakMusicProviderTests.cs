@@ -23,6 +23,8 @@ public class SpotifyBreakMusicProviderTests
     private SpotifyBreakMusicProvider Build(SpotifySettings? settings = null)
         => Build(settings, fader: null);
 
+    private readonly IBreakMusicSettings _breakMusic = Substitute.For<IBreakMusicSettings>();
+
     private SpotifyBreakMusicProvider Build(SpotifySettings? settings, FakeSpotifyFader? fader, TimeProvider? time = null)
     {
         _context.BindSettings<SpotifySettings>().Returns(settings ?? new SpotifySettings());
@@ -34,7 +36,8 @@ public class SpotifyBreakMusicProviderTests
                 _waited += span;
                 _onWaited?.Invoke(_waited);
                 return Task.CompletedTask;
-            });
+            },
+            breakMusic: _breakMusic);
     }
 
     // A property cannot go and ask, so it stays empty until a command has been through.
@@ -413,11 +416,12 @@ public class SpotifyBreakMusicProviderTests
         Assert.Empty(_controller.Calls);
     }
 
-    // The fade is the plugin's own setting; KHost's hint would hold the singer at the microphone.
+    // The fade is KHost's App Setting; its StopAsync hint would hold the singer at the microphone.
     [Fact]
     public async Task StopAsync_AFadeAsked_FadesOverThePluginsOwnLengthAndPutsTheLevelBack()
     {
-        var provider = Build(new SpotifySettings { FadeMilliseconds = 1200 }, new FakeSpotifyFader(_controller.Calls));
+        _breakMusic.FadeDuration.Returns(TimeSpan.FromMilliseconds(1200));
+        var provider = Build(new SpotifySettings(), new FakeSpotifyFader(_controller.Calls));
         _controller.Calls.Clear();
 
         await provider.StopAsync(TimeSpan.FromSeconds(2));
@@ -425,10 +429,25 @@ public class SpotifyBreakMusicProviderTests
         Assert.Equal(["silence 1200", "stop", "restore once quiet"], _controller.Calls);
     }
 
+    // The host edits the length while it runs; the provider must not have kept the value it was built with.
+    [Fact]
+    public async Task AFadeLengthChangedAfterBuilding_IsUsedByTheNextStop()
+    {
+        _breakMusic.FadeDuration.Returns(TimeSpan.FromMilliseconds(1200));
+        var provider = Build(new SpotifySettings(), new FakeSpotifyFader(_controller.Calls));
+
+        _breakMusic.FadeDuration.Returns(TimeSpan.FromMilliseconds(700));
+        _controller.Calls.Clear();
+        await provider.StopAsync();
+
+        Assert.Equal(["silence 700", "stop", "restore once quiet"], _controller.Calls);
+    }
+
     [Fact]
     public async Task AFadeOfZero_NeverTouchesSpotifysLevel()
     {
-        var provider = Build(new SpotifySettings { FadeMilliseconds = 0 }, new FakeSpotifyFader(_controller.Calls));
+        _breakMusic.FadeDuration.Returns(TimeSpan.Zero);
+        var provider = Build(new SpotifySettings(), new FakeSpotifyFader(_controller.Calls));
 
         await provider.StartAsync();
         await provider.PauseAsync();

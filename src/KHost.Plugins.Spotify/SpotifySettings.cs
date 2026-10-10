@@ -11,9 +11,6 @@ public class SpotifySettings
 
     public bool LaunchIfNotRunning { get; set; } = true;
 
-    /// <summary>Milliseconds. Zero turns fading off, and Spotify's level is then never touched.</summary>
-    public int FadeMilliseconds { get; set; } = 1500;
-
     /// <summary>Works around Spotify ending a track without starting the next: presses play, then
     /// skips, when a track stops at its own end with nobody asking. Needs a backend that is told
     /// when Spotify moves, so it does nothing on Linux.</summary>
