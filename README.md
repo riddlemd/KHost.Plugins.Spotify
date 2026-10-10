@@ -63,6 +63,9 @@ cannot see Spotify's queue, so a playlist that genuinely ran out is nudged as we
 | Break music | Launch Spotify if it is not already running | on | |
 | Bug fixes | Nudge Spotify when it ends a track without starting the next | on | macOS and Windows only. |
 
+A save applies while KHost runs, with no restart: the next Start, and the next stall or launch
+decision, uses the new values. A playlist that is already playing is not reloaded until the next Start.
+
 The Playlist field takes what "Copy link to playlist" puts on the clipboard
 (`https://open.spotify.com/playlist/…?si=…`) as well as the `spotify:playlist:…` form; the `si`
 share token is dropped. Albums, artists and `spotify:collection:…` links work too. A **single track
@@ -121,7 +124,7 @@ does not fade.
 
 ## Building
 
-The plugin builds against the published contracts, `KHost.Abstractions` and `KHost.Common` 0.56.0,
+The plugin builds against the published contracts, `KHost.Abstractions` and `KHost.Common` 0.58.0,
 as NuGet packages. Until they are on nuget.org they come from the local feed KHost's
 `./build/pack-contracts.sh` fills (see KHost's AGENTS.md, **The published contracts**).
 
@@ -144,5 +147,6 @@ directory, enable it on KHost's Plugins page, and restart KHost. The zip carries
 the entry dll and its `.deps.json` (plus the two WinRT dlls in the `-win` zip), and never a copy of
 the KHost contract assemblies. Then pick **Spotify** as the venue's break-music mode.
 
-The manifest's `apiVersion` is 1, the plugin API this was built against; a host runs it when that
-lies within the range the host supports.
+The manifest's `apiVersion` is 6, the plugin API this was built against; a host runs it when that
+lies within the range the host supports. Settings reach the plugin as `IOptionsMonitor<SpotifySettings>`,
+named by the `SpotifyPlugin` entry point, and are read on each use.

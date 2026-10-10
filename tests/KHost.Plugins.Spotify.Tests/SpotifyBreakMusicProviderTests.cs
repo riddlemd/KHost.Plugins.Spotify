@@ -4,6 +4,7 @@ using KHost.Abstractions.Services;
 using KHost.Plugins.Spotify;
 using KHost.Plugins.Spotify.Control;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using System.Diagnostics;
 
@@ -25,12 +26,21 @@ public class SpotifyBreakMusicProviderTests
 
     private readonly IBreakMusicSettings _breakMusic = Substitute.For<IBreakMusicSettings>();
 
+    private readonly IOptionsMonitor<SpotifySettings> _monitor = Substitute.For<IOptionsMonitor<SpotifySettings>>();
+    private Action<SpotifySettings, string?>? _settingsChanged;
+    private readonly IDisposable _subscription = Substitute.For<IDisposable>();
+
+    /// <summary>A host save: every later read answers with the new values.</summary>
+    private void Save(SpotifySettings settings)
+        => _monitor.CurrentValue.Returns(settings);
+
     private SpotifyBreakMusicProvider Build(SpotifySettings? settings, FakeSpotifyFader? fader, TimeProvider? time = null)
     {
-        _context.BindSettings<SpotifySettings>().Returns(settings ?? new SpotifySettings());
+        Save(settings ?? new SpotifySettings());
+        _monitor.OnChange(Arg.Do<Action<SpotifySettings, string?>>(handler => _settingsChanged = handler)).Returns(_subscription);
 
         return new SpotifyBreakMusicProvider(
-            _log, _context, _controller, broker: null, _flash, fader, time,
+            _log, _context, _monitor, _controller, broker: null, _flash, fader, time,
             delay: (span, _) =>
             {
                 _waited += span;
@@ -477,6 +487,99 @@ public class SpotifyBreakMusicProviderTests
         _controller.RaisePlaybackChanged();
 
         Assert.DoesNotContain("resume", _controller.Calls);
+    }
+
+[Fact]
+    public async Task StartAsync_ThePlaylistWasSavedAfterConstruction_PlaysTheNewOne()
+    {
+        var provider = Build(new SpotifySettings { PlaylistUri = "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M" });
+
+        Save(new SpotifySettings { PlaylistUri = "spotify:album:4aawyAB9vmqN3uQ7FjRGTy" });
+        await provider.StartAsync();
+
+        Assert.Equal("spotify:album:4aawyAB9vmqN3uQ7FjRGTy", _controller.StartedContextUri);
+    }
+
+    [Fact]
+    public async Task StartAsync_ShuffleWasSavedAfterConstruction_UsesTheNewValue()
+    {
+        var provider = Build(new SpotifySettings { Shuffle = true });
+
+        Save(new SpotifySettings { Shuffle = false });
+        await provider.StartAsync();
+
+        Assert.False(_controller.StartedWithShuffle);
+    }
+
+    [Fact]
+    public void AStall_RecoveryWasTurnedOnAfterConstruction_IsNudged()
+    {
+        Build(new SpotifySettings { RecoverStalledPlayback = false }, fader: null, new FakeTimeProvider());
+        Save(new SpotifySettings { RecoverStalledPlayback = true });
+
+        _controller.State = new SpotifyState(SpotifyPlayback.Paused, "Free Fallin'", "Tom Petty", 179000, 180000);
+        _controller.RaisePlaybackChanged();
+
+        Assert.Contains("resume", _controller.Calls);
+    }
+
+    [Fact]
+    public void AStall_RecoveryWasTurnedOffAfterConstruction_IsLeftAlone()
+    {
+        Build(new SpotifySettings { RecoverStalledPlayback = true }, fader: null, new FakeTimeProvider());
+        Save(new SpotifySettings { RecoverStalledPlayback = false });
+
+        _controller.State = new SpotifyState(SpotifyPlayback.Paused, "Free Fallin'", "Tom Petty", 179000, 180000);
+        _controller.RaisePlaybackChanged();
+
+        Assert.DoesNotContain("resume", _controller.Calls);
+    }
+
+    [Fact]
+    public void ASaveNamingAnUnplayablePlaylist_WarnsTheHost()
+    {
+        Build();
+        Save(new SpotifySettings { PlaylistUri = "https://example.com/nope" });
+
+        _settingsChanged!(_monitor.CurrentValue, null);
+
+        _context.Received(1).AddWarning(Arg.Is<string>(message => message.Contains("https://example.com/nope")));
+    }
+
+    [Fact]
+    public void ASaveThatLeavesTheSameBadPlaylist_DoesNotWarnAgain()
+    {
+        Build(new SpotifySettings { PlaylistUri = "https://example.com/nope" });
+
+        _settingsChanged!(_monitor.CurrentValue, null);
+        _settingsChanged!(_monitor.CurrentValue, null);
+
+        _context.Received(1).AddWarning(Arg.Any<string>());
+    }
+
+    [Fact]
+    public void ASaveThatFixesThenBreaksThePlaylist_WarnsAgain()
+    {
+        Build(new SpotifySettings { PlaylistUri = "https://example.com/nope" });
+
+        Save(new SpotifySettings { PlaylistUri = "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M" });
+        _settingsChanged!(_monitor.CurrentValue, null);
+        Save(new SpotifySettings { PlaylistUri = "https://example.com/nope" });
+        _settingsChanged!(_monitor.CurrentValue, null);
+
+        _context.Received(2).AddWarning(Arg.Any<string>());
+    }
+
+    [Fact]
+    public void SpotifyPlugin_NamesSpotifySettingsAsItsSettingsClass()
+        => Assert.True(typeof(IPlugin<SpotifySettings>).IsAssignableFrom(typeof(SpotifyPlugin)));
+
+    [Fact]
+    public void Dispose_StopsListeningForSaves()
+    {
+        Build().Dispose();
+
+        _subscription.Received(1).Dispose();
     }
 
     [Fact]

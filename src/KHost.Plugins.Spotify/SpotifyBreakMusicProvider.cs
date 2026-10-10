@@ -5,13 +5,14 @@ using KHost.Abstractions.Models;
 using KHost.Abstractions.Services;
 using KHost.Plugins.Spotify.Control;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace KHost.Plugins.Spotify;
 
 /// <summary>Break music out of the Spotify desktop app on this machine. The host carries none of
 /// this audio, so nothing here routes it to a screen or Cast. Spotify's level is only ever faded
 /// away from and back to wherever the host set it.</summary>
-public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
+public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider, IDisposable
 {
     /// <summary>Up to a second and a half, which is longer than Spotify has needed to turn a
     /// track over here and short enough that a refused skip does not hold the console.</summary>
@@ -28,13 +29,15 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly IMessageBroker? _broker;
     private readonly ISpotifyController _controller;
-    private readonly string? _contextUri;
-    private readonly bool _shuffle;
+    private readonly IPluginContext _context;
+    private readonly IOptionsMonitor<SpotifySettings> _settings;
+    private readonly IDisposable? _settingsSubscription;
+    private string? _warnedPlaylist;
 
     public SpotifyBreakMusicProvider(
-        ILogger<SpotifyBreakMusicProvider> logger, IPluginContext context, IMessageBroker broker,
-        IFlashService flash, IBreakMusicSettings breakMusic)
-        : this(logger, context, controller: null, broker, flash, breakMusic: breakMusic)
+        ILogger<SpotifyBreakMusicProvider> logger, IPluginContext context, IOptionsMonitor<SpotifySettings> settings,
+        IMessageBroker broker, IFlashService flash, IBreakMusicSettings breakMusic)
+        : this(logger, context, settings, controller: null, broker, flash, breakMusic: breakMusic)
     {
     }
 
@@ -44,6 +47,7 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
     internal SpotifyBreakMusicProvider(
         ILogger<SpotifyBreakMusicProvider> logger,
         IPluginContext context,
+        IOptionsMonitor<SpotifySettings> settings,
         ISpotifyController? controller,
         IMessageBroker? broker = null,
         IFlashService? flash = null,
@@ -55,13 +59,11 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
         _logger = logger;
         _broker = broker;
         _delay = delay ?? Task.Delay;
+        _context = context;
+        _settings = settings;
 
-        var settings = context.BindSettings<SpotifySettings>();
-
-        _contextUri = SpotifyUri.Normalize(settings.PlaylistUri);
-        _shuffle = settings.Shuffle;
-
-        var platform = controller ?? SpotifyControllerFactory.ForCurrentPlatform(logger, settings.LaunchIfNotRunning);
+        var platform = controller
+            ?? SpotifyControllerFactory.ForCurrentPlatform(logger, () => Settings.LaunchIfNotRunning);
 
         if (controller is null)
             fader ??= SpotifyControllerFactory.FaderForCurrentPlatform(logger);
@@ -72,17 +74,13 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
                 platform, fader, () => breakMusic?.FadeDuration ?? TimeSpan.Zero, flash);
         }
 
-        if (settings.RecoverStalledPlayback)
-            platform = new StallRecoveringSpotifyController(platform, time ?? TimeProvider.System, logger);
+        platform = new StallRecoveringSpotifyController(
+            platform, time ?? TimeProvider.System, logger, () => Settings.RecoverStalledPlayback);
 
         _controller = platform;
 
-        if (!string.IsNullOrWhiteSpace(settings.PlaylistUri) && _contextUri is null)
-        {
-            context.AddWarning(
-                $"'{settings.PlaylistUri}' is not a Spotify playlist, album or artist link, so break "
-                + "music will resume whatever Spotify already has loaded instead.");
-        }
+        WarnIfPlaylistUnusable();
+        _settingsSubscription = settings.OnChange((_, _) => WarnIfPlaylistUnusable());
 
         // Logged, not added as a warning: the host flashes every warning, and nothing here is
         // anything a host can act on, least of all while another provider is selected.
@@ -96,6 +94,31 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
         // Fire and forget: the console must not wait on another app to finish starting, and a
         // watch that never binds only costs the live display, not the host's ability to ask.
         _ = _controller.StartWatchingAsync();
+    }
+
+    /// <summary>Read on each use, never copied at construction: a save lands in CurrentValue
+    /// without a restart.</summary>
+    private SpotifySettings Settings => _settings.CurrentValue;
+
+    /// <summary>Once per distinct bad value, so an unrelated save does not repeat the warning.</summary>
+    private void WarnIfPlaylistUnusable()
+    {
+        var playlist = Settings.PlaylistUri;
+        var unusable = !string.IsNullOrWhiteSpace(playlist) && SpotifyUri.Normalize(playlist) is null;
+
+        if (!unusable)
+        {
+            _warnedPlaylist = null;
+            return;
+        }
+
+        if (playlist == _warnedPlaylist)
+            return;
+
+        _warnedPlaylist = playlist;
+        _context.AddWarning(
+            $"'{playlist}' is not a Spotify playlist, album or artist link, so break "
+            + "music will resume whatever Spotify already has loaded instead.");
     }
 
     /// <summary>Whatever Spotify says, so the host need not have started it to know about it.</summary>
@@ -138,7 +161,9 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
             return true;
         }
 
-        if (!await _controller.StartAsync(_contextUri, _shuffle, cancellationToken))
+        var settings = Settings;
+
+        if (!await _controller.StartAsync(SpotifyUri.Normalize(settings.PlaylistUri), settings.Shuffle, cancellationToken))
         {
             _logger.LogWarning("Spotify refused to start break music");
 
@@ -263,5 +288,7 @@ public sealed class SpotifyBreakMusicProvider : IBreakMusicProvider
     /// slider the host can move behind the room's back.</summary>
     public Task SetVolumeAsync(float volume, CancellationToken cancellationToken = default)
         => Task.CompletedTask;
+
+    public void Dispose() => _settingsSubscription?.Dispose();
 
 }

@@ -27,6 +27,7 @@ internal sealed class StallRecoveringSpotifyController : ISpotifyController
     private readonly ISpotifyController _inner;
     private readonly TimeProvider _time;
     private readonly ILogger _logger;
+    private readonly Func<bool> _enabled;
 
     private readonly List<DateTimeOffset> _nudges = [];
 
@@ -41,11 +42,15 @@ internal sealed class StallRecoveringSpotifyController : ISpotifyController
     private int _checking;
     private Task _lastCheck = Task.CompletedTask;
 
-    public StallRecoveringSpotifyController(ISpotifyController inner, TimeProvider time, ILogger logger)
+    /// <param name="enabled">Asked at each stall, not once, so the venue can turn recovery on or off
+    /// while Spotify plays; null is always on.</param>
+    public StallRecoveringSpotifyController(
+        ISpotifyController inner, TimeProvider time, ILogger logger, Func<bool>? enabled = null)
     {
         _inner = inner;
         _time = time;
         _logger = logger;
+        _enabled = enabled ?? (() => true);
 
         _inner.PlaybackChanged += (_, _) =>
         {
@@ -138,7 +143,8 @@ internal sealed class StallRecoveringSpotifyController : ISpotifyController
                 return;
             }
 
-            if (_pausedByHost || !LooksLikeAStall(state.ProgressMs, state.DurationMs, now - _songChangedAt))
+            // After the bookkeeping above, so switching recovery on mid-song judges against current state.
+            if (!_enabled() || _pausedByHost || !LooksLikeAStall(state.ProgressMs, state.DurationMs, now - _songChangedAt))
                 return;
 
             if (!MayNudge(now))

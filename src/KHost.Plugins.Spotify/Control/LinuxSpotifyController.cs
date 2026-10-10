@@ -16,9 +16,9 @@ public sealed class LinuxSpotifyController : ISpotifyController
     private static readonly TimeSpan LaunchSettle = TimeSpan.FromSeconds(5);
 
     private readonly ILogger _logger;
-    private readonly bool _launchIfNotRunning;
+    private readonly Func<bool> _launchIfNotRunning;
 
-    public LinuxSpotifyController(ILogger logger, bool launchIfNotRunning)
+    public LinuxSpotifyController(ILogger logger, Func<bool> launchIfNotRunning)
     {
         _logger = logger;
         _launchIfNotRunning = launchIfNotRunning;
@@ -34,7 +34,7 @@ public sealed class LinuxSpotifyController : ISpotifyController
     {
         if (!await PlayAsync(contextUri, shuffle, cancellationToken))
         {
-            if (!_launchIfNotRunning)
+            if (!_launchIfNotRunning())
             {
                 _logger.LogInformation("Spotify is not running and this plugin is set not to launch it");
                 return false;

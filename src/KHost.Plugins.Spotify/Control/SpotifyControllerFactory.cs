@@ -5,7 +5,7 @@ namespace KHost.Plugins.Spotify.Control;
 
 public static class SpotifyControllerFactory
 {
-    public static ISpotifyController ForCurrentPlatform(ILogger logger, bool launchIfNotRunning)
+    public static ISpotifyController ForCurrentPlatform(ILogger logger, Func<bool> launchIfNotRunning)
     {
         if (OperatingSystem.IsMacOS())
             return new MacOsSpotifyController(logger, launchIfNotRunning);

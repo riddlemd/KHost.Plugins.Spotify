@@ -16,11 +16,11 @@ public sealed class MacOsSpotifyController : ISpotifyController, IDisposable
     private static readonly TimeSpan LaunchSettle = TimeSpan.FromSeconds(3);
 
     private readonly ILogger _logger;
-    private readonly bool _launchIfNotRunning;
+    private readonly Func<bool> _launchIfNotRunning;
     private readonly Func<string, IEnumerable<string>, CancellationToken, Task<ProcessResult>> _run;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
 
-    public MacOsSpotifyController(ILogger logger, bool launchIfNotRunning)
+    public MacOsSpotifyController(ILogger logger, Func<bool> launchIfNotRunning)
         : this(logger, launchIfNotRunning,
             (file, arguments, token) => ProcessRunner.RunAsync(file, arguments, token),
             Task.Delay)
@@ -31,7 +31,7 @@ public sealed class MacOsSpotifyController : ISpotifyController, IDisposable
     /// osascript or waits out a real interval, asserting change detection by hand.</summary>
     internal MacOsSpotifyController(
         ILogger logger,
-        bool launchIfNotRunning,
+        Func<bool> launchIfNotRunning,
         Func<string, IEnumerable<string>, CancellationToken, Task<ProcessResult>> run,
         Func<TimeSpan, CancellationToken, Task> delay)
     {
@@ -138,7 +138,7 @@ public sealed class MacOsSpotifyController : ISpotifyController, IDisposable
         if (await RunAsync(script, cancellationToken))
             return true;
 
-        if (!_launchIfNotRunning)
+        if (!_launchIfNotRunning())
         {
             _logger.LogInformation("Spotify is not running and this plugin is set not to launch it");
             return false;

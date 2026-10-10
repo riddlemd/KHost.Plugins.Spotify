@@ -29,9 +29,9 @@ public sealed class WindowsSpotifyController : ISpotifyController
     internal const string SessionAppId = "Spotify.exe";
 
     private readonly ILogger _logger;
-    private readonly bool _launchIfNotRunning;
+    private readonly Func<bool> _launchIfNotRunning;
 
-    public WindowsSpotifyController(ILogger logger, bool launchIfNotRunning)
+    public WindowsSpotifyController(ILogger logger, Func<bool> launchIfNotRunning)
     {
         _logger = logger;
         _launchIfNotRunning = launchIfNotRunning;
@@ -67,7 +67,7 @@ public sealed class WindowsSpotifyController : ISpotifyController
 
         if (!IsRunning())
         {
-            if (!_launchIfNotRunning)
+            if (!_launchIfNotRunning())
             {
                 _logger.LogInformation("Spotify is not running and this plugin is set not to launch it");
                 return false;

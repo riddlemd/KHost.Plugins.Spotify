@@ -19,7 +19,7 @@ public class MacOsSpotifyWatchTests
         => $"{state}\t{title}\t{artist}";
 
     private MacOsSpotifyController Controller()
-        => new(NullLogger.Instance, launchIfNotRunning: false,
+        => new(NullLogger.Instance, launchIfNotRunning: () => false,
             run: (_, _, _) =>
             {
                 Interlocked.Increment(ref _asks);

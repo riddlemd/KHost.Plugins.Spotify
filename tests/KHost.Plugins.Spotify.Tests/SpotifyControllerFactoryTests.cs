@@ -10,7 +10,7 @@ public class SpotifyControllerFactoryTests
     [Fact]
     public void ForCurrentPlatform_ReturnsTheControllerForThisOS()
     {
-        var controller = SpotifyControllerFactory.ForCurrentPlatform(NullLogger.Instance, launchIfNotRunning: false);
+        var controller = SpotifyControllerFactory.ForCurrentPlatform(NullLogger.Instance, launchIfNotRunning: () => false);
 
         if (OperatingSystem.IsMacOS())
             Assert.IsType<MacOsSpotifyController>(controller);
