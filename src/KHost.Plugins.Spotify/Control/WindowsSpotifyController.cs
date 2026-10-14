@@ -9,7 +9,6 @@ namespace KHost.Plugins.Spotify.Control;
 /// keyboard's media keys only while Spotify has no row.</summary>
 /// <remarks>A media key lands on whichever app owns media focus, so it is the last resort: KHost's
 /// own screen or a browser tab takes focus the moment it plays anything.</remarks>
-[SupportedOSPlatform("windows")]
 public sealed class WindowsSpotifyController : ISpotifyController
 {
     private const byte MediaNextTrack = 0xB0;
@@ -19,11 +18,13 @@ public sealed class WindowsSpotifyController : ISpotifyController
 
     private static readonly TimeSpan LaunchSettle = TimeSpan.FromSeconds(5);
 
+#if WINDOWS_MEDIA_SESSION
     /// <summary>Wide enough to swallow a pair raised a millisecond apart, short enough that the
     /// console still follows the room.</summary>
     private static readonly TimeSpan CoalesceWindow = TimeSpan.FromMilliseconds(250);
 
     private int _raiseGeneration;
+#endif
 
     /// <summary>Spotify's own session id on the system media transport.</summary>
     internal const string SessionAppId = "Spotify.exe";
@@ -31,13 +32,20 @@ public sealed class WindowsSpotifyController : ISpotifyController
     private readonly ILogger _logger;
     private readonly Func<bool> _launchIfNotRunning;
 
+    // Only construction is Windows-bound; the static decisions below are tested on every OS.
+    [SupportedOSPlatform("windows")]
     public WindowsSpotifyController(ILogger logger, Func<bool> launchIfNotRunning)
     {
         _logger = logger;
         _launchIfNotRunning = launchIfNotRunning;
     }
 
+#if WINDOWS_MEDIA_SESSION
     public event EventHandler? PlaybackChanged;
+#else
+    // Built without the media session, nothing reports Spotify moving on its own.
+    public event EventHandler? PlaybackChanged { add { } remove { } }
+#endif
 
     public string? Limitation =>
         "On Windows Spotify is controlled through its media session, which appears once it has "
@@ -147,6 +155,10 @@ public sealed class WindowsSpotifyController : ISpotifyController
     }
 
 #if WINDOWS_MEDIA_SESSION
+    /// <summary>The media session arrived in Windows 10 1809; before it the media keys are all there is.</summary>
+    [SupportedOSPlatformGuard("windows10.0.17763.0")]
+    private static bool HasMediaSession => OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763);
+
     /// <summary>Held for the life of this controller: the session raises nothing once it is
     /// collected, and a watch that stops after garbage collection is worse than no watch.</summary>
     private Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager? _sessionManager;
@@ -156,6 +168,9 @@ public sealed class WindowsSpotifyController : ISpotifyController
     /// pause in Spotify's window reaches the console without polling all shift.</summary>
     public async Task StartWatchingAsync(CancellationToken cancellationToken = default)
     {
+        if (!HasMediaSession)
+            return;
+
         try
         {
             _sessionManager = await Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager
@@ -172,6 +187,7 @@ public sealed class WindowsSpotifyController : ISpotifyController
         }
     }
 
+    [SupportedOSPlatform("windows10.0.17763.0")]
     private void RebindSession()
     {
         try
@@ -218,6 +234,9 @@ public sealed class WindowsSpotifyController : ISpotifyController
     /// flyout shows, filtered by session id so another focused player is not mistaken for it.</summary>
     public async Task<SpotifyState?> GetStateAsync(CancellationToken cancellationToken = default)
     {
+        if (!HasMediaSession)
+            return null;
+
         try
         {
             var manager = await Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager
@@ -242,18 +261,15 @@ public sealed class WindowsSpotifyController : ISpotifyController
             long? progressMs = null;
             long? durationMs = null;
 
-            if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763))
-            {
-                // Position is as of the session's last update, which is exact while paused: the
-                // only time the playhead is asked for, to tell a stall from a pause.
-                var timeline = session.GetTimelineProperties();
-                var duration = timeline.EndTime - timeline.StartTime;
+            // Position is as of the session's last update, which is exact while paused: the only
+            // time the playhead is asked for, to tell a stall from a pause.
+            var timeline = session.GetTimelineProperties();
+            var duration = timeline.EndTime - timeline.StartTime;
 
-                if (duration > TimeSpan.Zero)
-                {
-                    progressMs = (long)(timeline.Position - timeline.StartTime).TotalMilliseconds;
-                    durationMs = (long)duration.TotalMilliseconds;
-                }
+            if (duration > TimeSpan.Zero)
+            {
+                progressMs = (long)(timeline.Position - timeline.StartTime).TotalMilliseconds;
+                durationMs = (long)duration.TotalMilliseconds;
             }
 
             return new SpotifyState(playback, properties?.Title, properties?.Artist, progressMs, durationMs);
@@ -269,6 +285,9 @@ public sealed class WindowsSpotifyController : ISpotifyController
     /// <summary>True or false for Spotify's own answer; null when it has no session to ask.</summary>
     private async Task<bool?> TrySessionCommandAsync(SessionCommand command, CancellationToken cancellationToken)
     {
+        if (!HasMediaSession)
+            return null;
+
         try
         {
             var manager = await Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager

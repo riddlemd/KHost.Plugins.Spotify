@@ -5,7 +5,6 @@ namespace KHost.Plugins.Spotify.Control;
 
 /// <summary>Drives Spotify.app through its AppleScript dictionary, which has the discrete play,
 /// pause and next commands this plugin needs, no toggle to keep track of.</summary>
-[SupportedOSPlatform("macos")]
 public sealed class MacOsSpotifyController : ISpotifyController, IDisposable
 {
     /// <summary>osascript's code for an Apple event the user has not granted Automation access to.</summary>
@@ -20,6 +19,8 @@ public sealed class MacOsSpotifyController : ISpotifyController, IDisposable
     private readonly Func<string, IEnumerable<string>, CancellationToken, Task<ProcessResult>> _run;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
 
+    // Only the real osascript is macOS-bound; the seams below run anywhere, which is how it is tested.
+    [SupportedOSPlatform("macos")]
     public MacOsSpotifyController(ILogger logger, Func<bool> launchIfNotRunning)
         : this(logger, launchIfNotRunning,
             (file, arguments, token) => ProcessRunner.RunAsync(file, arguments, token),
