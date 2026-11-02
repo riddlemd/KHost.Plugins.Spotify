@@ -1,3 +1,9 @@
+<div align="center">
+
+![KHost.Plugins.Spotify: music between the singers](docs/assets/social-preview.png)
+
+</div>
+
 # KHost.Plugins.Spotify
 
 Break-music provider for [KHost](https://github.com/riddlemd/KHost). Puts the Spotify desktop app on
